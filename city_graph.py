@@ -16,19 +16,12 @@ grid layout (4-directional connections as stated in design document):
       ...
     (9,0) — (9,1) — (9,2) ... (9,9)
 
-enhancements over base version:
+improvements over base version:
     1. realistic population density per location type
     2. smart initial risk index based on location type
     3. human-readable node label stored alongside (row,col) id
     4. validate() method for full graph consistency checking
     5. timestamped and categorized event log with step tracking
-    6. get_open_neighbors_with_cost() for a* convenience
-    7. base_cost update in set_location_type is guarded — will not
-       overwrite costs already set by challenge 2 (mst)
-    8. _build_grid now sets is_accessible correctly for all nodes,
-       including corner and edge nodes that have fewer neighbors
-    9. mst_built flag added so cost-guard logic knows when challenge 2
-       has already finalised the road network
 """
 
 import networkx as nx
@@ -111,10 +104,6 @@ class CityGraph:
         number of columns in the grid (default 10)
     graph : networkx.Graph
         the underlying graph storing all node and edge data
-    mst_built : bool
-        set to true by challenge 2 after the road network is finalised.
-        once true, set_location_type will not overwrite base_cost values
-        because mst has already set the correct construction costs.
     current_simulation_step : int
         tracks which simulation step we are on — used for log timestamps
     event_log : list of dict
@@ -141,11 +130,6 @@ class CityGraph:
 
         # the networkx graph is the core data structure holding all city data
         self.graph = nx.Graph()
-
-        # flag set by challenge 2 after mst finalises the road network.
-        # prevents set_location_type from overwriting mst-assigned base costs
-        # if it is ever called after the road network is built.
-        self.mst_built = False
 
         # tracks which simulation step is currently running — used for log timestamps
         self.current_simulation_step = 0
@@ -179,9 +163,6 @@ class CityGraph:
         populate the graph with all nodes and all possible connecting edges.
 
         step a: one node per grid cell with default attribute values.
-                is_accessible is computed correctly here — a corner node
-                that has only 2 neighbors is still accessible because both
-                neighbors are reachable via unblocked roads.
         step b: edges between every horizontally and vertically adjacent pair.
                 connecting right and down only avoids duplicate edges.
 
@@ -189,20 +170,22 @@ class CityGraph:
         and will set their final costs.
         """
 
-        # step a — add all nodes with default attribute values.
-        # is_accessible is set to False first; it is corrected in step b
-        # after all edges exist, so the check has something to read.
+        # step a — add all nodes with default attribute values
         for row in range(self.rows):
             for col in range(self.cols):
                 cell_id = (row, col)
+
+                # human-readable label for ui and event log display
+                # e.g. node (3,7) gets label "N(3,7)" until a type is assigned
                 readable_label = "N({},{})".format(row, col)
+
                 self.graph.add_node(
                     cell_id,
                     label              = readable_label,
                     location_type      = "Empty",
                     population_density = 0.0,
                     risk_index         = 0.0,
-                    is_accessible      = False  # corrected below after edges are added
+                    is_accessible      = True
                 )
 
         # step b — connect each cell to its right and bottom neighbors only
@@ -210,6 +193,7 @@ class CityGraph:
             for col in range(self.cols):
                 current_cell = (row, col)
 
+                # right neighbor: same row, next column
                 if col + 1 < self.cols:
                     right_cell = (row, col + 1)
                     self.graph.add_edge(
@@ -218,6 +202,7 @@ class CityGraph:
                         blocked   = False
                     )
 
+                # bottom neighbor: next row, same column
                 if row + 1 < self.rows:
                     bottom_cell = (row + 1, col)
                     self.graph.add_edge(
@@ -225,15 +210,6 @@ class CityGraph:
                         base_cost = 1.0,
                         blocked   = False
                     )
-
-        # step c — now that all edges exist, compute initial is_accessible
-        # for every node correctly. a node is accessible if it has at least
-        # one unblocked road — on a fresh grid that means at least one neighbor.
-        # corner nodes have 2 neighbors, edge nodes have 3, center nodes have 4.
-        # all are accessible because no roads are blocked yet.
-        for cell in self.graph.nodes:
-            neighbor_count = len(list(self.graph.neighbors(cell)))
-            self.graph.nodes[cell]["is_accessible"] = neighbor_count > 0
 
     # ─────────────────────────────────────────────────────────────────────────
     # read node data
@@ -279,7 +255,7 @@ class CityGraph:
         """
         return a list of neighboring nodes reachable via unblocked roads.
         blocked roads are treated as if they do not exist.
-        used by a* and bfs when traversing the graph.
+        used by bfs when traversing the graph.
         """
         open_neighbors = []
         for neighbor_cell in self.graph.neighbors(cell):
@@ -290,23 +266,23 @@ class CityGraph:
 
     def get_open_neighbors_with_cost(self, cell):
         """
-        return a list of (neighbor, effective_cost) pairs for all
-        reachable neighbors — roads where blocked is False only.
+        return a list of (neighbor, effective_cost) tuples for all
+        reachable neighbors via unblocked roads.
 
-        this is the primary method challenge 4 (a*) uses when expanding
-        nodes during path search. calling this once per node avoids
-        separate calls to get_open_neighbors and get_effective_cost.
+        used by challenge 3 (ga dijkstra) and challenge 4 (a*) so they
+        get risk-weighted costs automatically without reading edge data directly.
+        blocked roads are excluded — they produce no entry in the list.
 
-        example return value for a node with 3 open neighbors:
-            [((2,3), 1.2), ((2,5), 0.8), ((3,4), 1.6)]
+        example:
+            for neighbor, cost in city.get_open_neighbors_with_cost((3,4)):
+                new_dist = current_dist + cost
         """
-        result = []
+        neighbors_with_cost = []
         for neighbor_cell in self.graph.neighbors(cell):
-            road_data = self.graph.edges[cell, neighbor_cell]
-            if not road_data["blocked"]:
-                cost = self.get_effective_cost(cell, neighbor_cell)
-                result.append((neighbor_cell, cost))
-        return result
+            cost = self.get_effective_cost(cell, neighbor_cell)
+            if cost < math.inf:
+                neighbors_with_cost.append((neighbor_cell, cost))
+        return neighbors_with_cost
 
     def all_nodes(self):
         """return a list of all (row, col) node ids in the graph."""
@@ -335,16 +311,13 @@ class CityGraph:
         assign a location type to a node.
         called by challenge 1 (csp) when placing buildings on the grid.
 
-        automatically handles side effects:
+        automatically handles 4 side effects:
             1. sets the location_type attribute
             2. sets realistic population_density from POPULATION_BY_TYPE
             3. sets smart initial risk_index from INITIAL_RISK_BY_TYPE
             4. upgrades the label e.g. from "N(2,3)" to "Hospital(2,3)"
-            5. updates base_cost on all adjacent edges — but only if
-               challenge 2 (mst) has not yet run. once mst_built is True,
-               base costs are owned by challenge 2 and must not be changed
-               here. this prevents csp or any late call from accidentally
-               overwriting carefully computed mst road costs.
+            5. updates base_cost on all adjacent edges
+               (roads touching residential zones cost 0.8, others 1.0)
         """
         if location_type not in VALID_LOCATION_TYPES:
             raise ValueError("unknown location type '{}'. valid: {}".format(
@@ -360,15 +333,13 @@ class CityGraph:
         # upgrade label to include the assigned type for clarity in logs and ui
         self.graph.nodes[cell]["label"] = "{}({},{})".format(location_type, row, col)
 
-        # update road costs only if challenge 2 has not yet finalised the network.
-        # once mst_built is True the costs belong to challenge 2 — do not touch them.
-        if not self.mst_built:
-            for neighbor_cell in self.graph.neighbors(cell):
-                neighbor_type = self.graph.nodes[neighbor_cell]["location_type"]
-                if location_type == "Residential" or neighbor_type == "Residential":
-                    self.graph.edges[cell, neighbor_cell]["base_cost"] = 0.8
-                else:
-                    self.graph.edges[cell, neighbor_cell]["base_cost"] = 1.0
+        # update road costs for all edges touching this node
+        for neighbor_cell in self.graph.neighbors(cell):
+            neighbor_type = self.graph.nodes[neighbor_cell]["location_type"]
+            if location_type == "Residential" or neighbor_type == "Residential":
+                self.graph.edges[cell, neighbor_cell]["base_cost"] = 0.8
+            else:
+                self.graph.edges[cell, neighbor_cell]["base_cost"] = 1.0
 
         self._log(
             EVENT_LAYOUT,
@@ -463,6 +434,17 @@ class CityGraph:
         """
         return list(self.graph.edges(data=True))
 
+    def get_blocked_edges(self):
+        """
+        Return a list of all blocked edges (tuples of (cell_a, cell_b)).
+        Used for flood recovery.
+        """
+        blocked = []
+        for a, b, data in self.graph.edges(data=True):
+            if data["blocked"]:
+                blocked.append((a, b))
+        return blocked
+
     # ─────────────────────────────────────────────────────────────────────────
     # write edge data — flood events
     # ─────────────────────────────────────────────────────────────────────────
@@ -497,10 +479,16 @@ class CityGraph:
 
     def unblock_road(self, cell_a, cell_b):
         """
-        restore a previously blocked road.
-        used for testing and optional simulation recovery events.
+        Restore a previously blocked road.
+        Called during flood recovery events.
         """
-        if self.graph.has_edge(cell_a, cell_b):
+        if not self.graph.has_edge(cell_a, cell_b):
+            self._log(EVENT_SYSTEM, "warning: tried to unblock non-existent road {} — {}".format(
+                cell_a, cell_b
+            ))
+            return
+        
+        if self.graph.edges[cell_a, cell_b]["blocked"]:
             self.graph.edges[cell_a, cell_b]["blocked"] = False
             self._log(
                 EVENT_RESTORE,
@@ -508,6 +496,7 @@ class CityGraph:
                     self.get_label(cell_a), self.get_label(cell_b)
                 )
             )
+            # Re-check accessibility for both endpoints
             self._check_and_update_accessibility(cell_a)
             self._check_and_update_accessibility(cell_b)
 
@@ -710,10 +699,8 @@ class CityGraph:
                     "label '{}' does not match position {}".format(node_label, cell)
                 )
 
-            # check 7: is_accessible must reflect actual open road count.
-            # a node with no neighbors at all (only possible on a 1x1 grid)
-            # is correctly treated as inaccessible.
-            actual_open_road_count = sum(
+            # check 7: is_accessible must reflect actual open road count
+            actual_open_road_count   = sum(
                 1 for nb in self.graph.neighbors(cell)
                 if not self.graph.edges[cell, nb]["blocked"]
             )
@@ -905,6 +892,36 @@ class CityGraph:
                 row_display += "{:.0f} ".format(pop_value)
             print(row_display)
         print("────────────────────────────────────────────────────\n")
+        
+    def verify_hospital_depot_redundancy(self):
+        """
+        Verify that there are two edge-disjoint paths between primary hospital and depot.
+        Returns (bool, connectivity_value, message)
+        """
+        if self.primary_hospital is None or self.primary_depot is None:
+            return False, 0, "primary hospital or depot not set"
+        
+        try:
+            # Create temporary graph with only unblocked edges
+            import networkx as nx
+            temp_graph = nx.Graph()
+            for cell in self.all_nodes():
+                temp_graph.add_node(cell)
+            for u, v, data in self.get_all_edges():
+                if not data["blocked"]:
+                    temp_graph.add_edge(u, v, weight=data["base_cost"])
+            
+            # Check edge connectivity
+            conn = nx.edge_connectivity(temp_graph, self.primary_hospital, self.primary_depot)
+            
+            if conn >= 2:
+                self._log("SYSTEM", "redundancy verified: {} independent paths between hospital and depot".format(conn))
+                return True, conn, "OK - {} independent paths".format(conn)
+            else:
+                self._log("SYSTEM", "WARNING: only {} path between hospital and depot".format(conn))
+                return False, conn, "WARNING: only {} path(s) - redundancy missing".format(conn)
+        except Exception as e:
+            return False, 0, "verification error: {}".format(str(e))
 
     def summary(self):
         """
@@ -917,36 +934,9 @@ class CityGraph:
         print("  total nodes       : {}".format(self.graph.number_of_nodes()))
         print("  total edges       : {}".format(self.graph.number_of_edges()))
         print("  simulation step   : {}".format(self.current_simulation_step))
-        print("  mst built         : {}".format(self.mst_built))
 
         # count each location type across all nodes
         type_counts = {}
         for cell in self.graph.nodes:
             cell_type              = self.graph.nodes[cell]["location_type"]
             type_counts[cell_type] = type_counts.get(cell_type, 0) + 1
-        print("  location types:")
-        for location_type, count in sorted(type_counts.items()):
-            print("    {:15s} : {}".format(location_type, count))
-
-        # count blocked roads
-        blocked_road_count = sum(
-            1 for _, _, road_data in self.graph.edges(data=True)
-            if road_data["blocked"]
-        )
-        print("  blocked roads     : {}".format(blocked_road_count))
-        print("  primary hospital  : {}".format(self.primary_hospital))
-        print("  primary depot     : {}".format(self.primary_depot))
-        print("  ambulances at     : {}".format(self.ambulance_positions))
-        print("  log entries       : {}".format(len(self.event_log)))
-
-        # run full validation inline
-        validation_result = self.validate()
-        print("  validation        : {}".format(
-            "passed" if validation_result["passed"] else "FAILED"
-        ))
-        for error_msg in validation_result["errors"]:
-            print("    ERROR   — {}".format(error_msg))
-        for warning_msg in validation_result["warnings"]:
-            print("    warning — {}".format(warning_msg))
-
-        print("═════════════════════════════════════════════════════\n")
