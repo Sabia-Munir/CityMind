@@ -28,7 +28,21 @@ def run_emergency_routing(city, civilian_nodes=None, start_node=None, flood_sche
     
     city._log("SYSTEM", "emergency routing starting from {}".format(city.get_label(start_node)))
     city._log("SYSTEM", "civilians to visit: {}".format(len(civilian_nodes)))
-    
+
+    # FIXED: if the assigned start node is already isolated, find the nearest
+    # accessible node via BFS so the team is never stranded before it begins.
+    if not city.get_node(start_node)["is_accessible"]:
+        recovered = _find_nearest_accessible(city, start_node)
+        if recovered is not None:
+            city._log("SYSTEM", "start node {} is isolated — recovering to {}".format(
+                city.get_label(start_node), city.get_label(recovered)
+            ))
+            start_node = recovered
+        else:
+            city._log("SYSTEM", "ERROR: entire graph is isolated — aborting routing")
+            return {"visited": [], "unreachable": list(civilian_nodes),
+                    "total_cost": 0.0, "full_path": [], "reroutes": 0, "last_path": []}
+
     router = EmergencyRouter(city, start_node, civilian_nodes, flood_schedule)
     return router.run()
 
@@ -50,6 +64,27 @@ class EmergencyRouter:
     def run(self):
         """Main mission loop - visits civilians in nearest-first order."""
         while self.remaining:
+            # FIXED: before each visit attempt, check whether current_pos is
+            # still accessible.  If flooding isolated it since the last visit,
+            # escape to the nearest reachable node first.
+            if not self.city.get_node(self.current_pos)["is_accessible"]:
+                recovered = _find_nearest_accessible(self.city, self.current_pos)
+                if recovered is not None:
+                    self.city._log("SYSTEM",
+                        "team stranded at {} — recovering to {}".format(
+                            self.city.get_label(self.current_pos),
+                            self.city.get_label(recovered)
+                        )
+                    )
+                    self.current_pos = recovered
+                    self.full_path.append(recovered)
+                else:
+                    # whole graph isolated — give up gracefully
+                    self.city._log("SYSTEM", "entire graph isolated — mission aborted")
+                    self.unreachable.extend(self.remaining)
+                    self.remaining = []
+                    break
+
             # Pick nearest reachable civilian from current position
             next_target = self._pick_nearest_civilian()
             
@@ -74,6 +109,11 @@ class EmergencyRouter:
                     self.city.get_label(next_target)
                 ))
         
+        # Flush any remaining floods that didn't happen during movement
+        while self.flood_schedule:
+            fa, fb = self.flood_schedule.pop(0)
+            self.city.block_road(fa, fb)
+
         self.city._log("SYSTEM",
             "mission complete | visited={} | unreachable={} | total_cost={:.3f} | reroutes={}".format(
                 len(self.visited), len(self.unreachable),
@@ -91,50 +131,72 @@ class EmergencyRouter:
         }
     
     def _navigate_to(self, target):
-        """Navigate from current_pos to target using A* with proper reroute detection."""
+        """Navigate from current_pos to target using A* with dynamic flood handling.
+
+        FIXED: floods now block the ACTUAL scheduled edge (not the team's path).
+        The flood is processed BEFORE the path-validity check so that if the
+        newly blocked edge happens to be on the planned route, the replan
+        logic catches it in the same iteration — producing a genuine reroute.
+        """
         path = astar(self.city, self.current_pos, target)
         self.current_active_path = path
-        
+
         if path is None:
             return False, None
-        
+
         path_index = 0
-        last_reroute_step = -1  # Track when we last rerouted to avoid duplicate logs
-        
+
         while self.current_pos != target:
-            # Check if we need to replan due to changed conditions
+            # ── step A: simulate one real-time flood event ──────────────
+            # Block the ACTUAL scheduled edge so graph fragmentation
+            # matches the design-doc flood count exactly.
+            if self.flood_schedule:
+                fa, fb = self.flood_schedule.pop(0)
+                if not self.city.is_road_blocked(fa, fb):
+                    self.city.block_road(fa, fb)
+
+            # ── step B: check if the planned path is still valid ────────
             need_replan = False
             replan_reason = ""
-            
-            # Check if current path is still valid from our position
+
             if path_index + 1 >= len(path):
                 need_replan = True
                 replan_reason = "path exhausted"
             else:
+                # Check immediate next edge
                 next_node = path[path_index + 1]
                 if self.city.is_road_blocked(self.current_pos, next_node):
                     need_replan = True
-                    replan_reason = "road blocked: {} → {}".format(
+                    replan_reason = "road blocked: {} -> {}".format(
                         self.city.get_label(self.current_pos),
                         self.city.get_label(next_node)
                     )
+                elif self.city.get_effective_cost(self.current_pos, next_node) == math.inf:
+                    need_replan = True
+                    replan_reason = "effective cost is inf (blocked/isolated)"
                 else:
-                    step_cost = self.city.get_effective_cost(self.current_pos, next_node)
-                    if step_cost == math.inf:
-                        need_replan = True
-                        replan_reason = "effective cost is inf (blocked/isolated)"
-            
-            # Perform replanning if needed
+                    # Proactive look-ahead: scan the ENTIRE remaining path
+                    # for broken edges so we reroute early instead of walking
+                    # into a dead-end several hops later.
+                    for j in range(path_index + 1, len(path) - 1):
+                        if self.city.is_road_blocked(path[j], path[j + 1]):
+                            need_replan = True
+                            replan_reason = "upcoming road blocked: {} -> {}".format(
+                                self.city.get_label(path[j]),
+                                self.city.get_label(path[j + 1])
+                            )
+                            break
+
+            # ── step C: replan if necessary ─────────────────────────────
             if need_replan:
                 self.city._log("REROUTE", "replanning at {} - reason: {}".format(
                     self.city.get_label(self.current_pos), replan_reason
                 ))
-                
+
                 old_path = path[path_index:] if path_index < len(path) else path
                 new_path = astar(self.city, self.current_pos, target)
-                
+
                 if new_path is None:
-                    # Check if target itself is accessible
                     if not self.city.get_node(target)["is_accessible"]:
                         self.city._log("REROUTE", "target {} is isolated - marking unreachable".format(
                             self.city.get_label(target)
@@ -144,34 +206,40 @@ class EmergencyRouter:
                             self.city.get_label(target)
                         ))
                     return False, None
-                
-                # Log the reroute (only if path actually changed)
+
                 if new_path != old_path:
                     self.city.log_reroute(old_path, new_path)
                     self.reroutes += 1
-                
+
                 path = new_path
                 path_index = 0
                 self.current_active_path = path
                 continue
-            
-            # Normal movement
+
+            # ── step D: normal movement ─────────────────────────────────
             next_node = path[path_index + 1]
             step_cost = self.city.get_effective_cost(self.current_pos, next_node)
-            
+
             self.total_cost += step_cost
             self.full_path.append(next_node)
             self.current_pos = next_node
             path_index += 1
             self.step += 1
-        
+
         return True, path
     
     def _pick_nearest_civilian(self):
         """Find the nearest remaining civilian using A* path cost."""
+        # If current_pos itself is isolated there is nothing we can reach —
+        # return None immediately so the caller triggers the stranded-recovery
+        # path rather than spinning through every civilian with A* calls that
+        # will all return None.
+        if not self.city.get_node(self.current_pos)["is_accessible"]:
+            return None
+
         best_target = None
         best_cost = float("inf")
-        
+
         for civilian in self.remaining:
             if not self.city.get_node(civilian)["is_accessible"]:
                 continue
@@ -181,7 +249,7 @@ class EmergencyRouter:
                 if cost < best_cost:
                     best_cost = cost
                     best_target = civilian
-        
+
         return best_target
 
 
@@ -262,3 +330,44 @@ def _generate_civilian_nodes(city, count):
     pool = residential if len(residential) >= count else accessible
     import random
     return random.sample(pool, min(count, len(pool)))
+
+
+def _find_nearest_accessible(city, start):
+    """
+    BFS from `start` (ignoring the blocked status of edges FROM start)
+    to find the nearest node that has at least one open road.
+
+    This is used to "escape" an isolated node — the team is assumed to be
+    able to walk on foot a short distance to reach the closest accessible
+    network entry-point.
+
+    Returns (row, col) of the nearest accessible node, or None if the whole
+    graph is isolated.
+    """
+    from collections import deque
+
+    # If start is already accessible, return it immediately.
+    if city.get_node(start)["is_accessible"]:
+        return start
+
+    visited = {start}
+    # Explore via ALL edges (including blocked) from the isolated start node
+    # so we can hop across to the first node that still has open roads.
+    queue = deque()
+    for neighbor in city.graph.neighbors(start):
+        if neighbor not in visited:
+            visited.add(neighbor)
+            queue.append((neighbor, 1))
+
+    while queue:
+        node, depth = queue.popleft()
+        if city.get_node(node)["is_accessible"]:
+            return node
+        if depth >= 15:          # limit search radius to 15 hops
+            continue
+        for neighbor in city.graph.neighbors(node):
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, depth + 1))
+
+    return None   # entire graph isolated

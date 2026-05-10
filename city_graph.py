@@ -29,9 +29,9 @@ import math
 from collections import deque
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # constants
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 # all valid location types the csp module can assign to a node
 VALID_LOCATION_TYPES = [
@@ -81,9 +81,9 @@ EVENT_SYSTEM   = "SYSTEM"
 EVENT_VALIDATE = "VALIDATE"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # main class
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 class CityGraph:
     """
@@ -154,9 +154,9 @@ class CityGraph:
             )
         )
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # private: build the initial grid
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _build_grid(self):
         """
@@ -211,9 +211,9 @@ class CityGraph:
                         blocked   = False
                     )
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # read node data
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def get_node(self, cell):
         """
@@ -302,9 +302,9 @@ class CityGraph:
                 matching_nodes.append(cell)
         return matching_nodes
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # write node data
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def set_location_type(self, cell, location_type):
         """
@@ -377,7 +377,7 @@ class CityGraph:
 
         self._log(
             EVENT_RISK,
-            "risk updated at {} | {:.2f} → {:.2f}".format(
+            "risk updated at {} | {:.2f} -> {:.2f}".format(
                 self.get_label(cell), old_risk, clamped_risk
             )
         )
@@ -390,9 +390,9 @@ class CityGraph:
         """
         self.current_simulation_step = step_number
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # read edge data
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def get_effective_cost(self, cell_a, cell_b):
         """
@@ -445,9 +445,9 @@ class CityGraph:
                 blocked.append((a, b))
         return blocked
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # write edge data — flood events
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def block_road(self, cell_a, cell_b):
         """
@@ -468,7 +468,7 @@ class CityGraph:
 
         self._log(
             EVENT_FLOOD,
-            "road blocked: {} ↔ {} (effective cost now inf)".format(
+            "road blocked: {} <-> {} (effective cost now inf)".format(
                 self.get_label(cell_a), self.get_label(cell_b)
             )
         )
@@ -492,7 +492,7 @@ class CityGraph:
             self.graph.edges[cell_a, cell_b]["blocked"] = False
             self._log(
                 EVENT_RESTORE,
-                "road restored: {} ↔ {}".format(
+                "road restored: {} <-> {}".format(
                     self.get_label(cell_a), self.get_label(cell_b)
                 )
             )
@@ -529,9 +529,9 @@ class CityGraph:
                 )
             )
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # utility: bfs hop counting
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def bfs_hops(self, start_cell, goal_cell):
         """
@@ -586,9 +586,9 @@ class CityGraph:
                 minimum_hops = hop_count
         return minimum_hops
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # utility: geometry helpers
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def euclidean_distance(self, cell_a, cell_b):
         """
@@ -624,9 +624,9 @@ class CityGraph:
         row, col = cell
         return 0 <= row < self.rows and 0 <= col < self.cols
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # validation — full consistency check for the entire graph
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def validate(self):
         """
@@ -755,9 +755,9 @@ class CityGraph:
             "warnings": found_warnings
         }
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # event log — timestamped and categorized
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _log(self, category, message):
         """
@@ -792,8 +792,8 @@ class CityGraph:
         old_path : list of tuples — the path before the road was blocked
         new_path : list of tuples — the new path calculated after blocking
         """
-        old_label_path = " → ".join(self.get_label(cell) for cell in old_path)
-        new_label_path = " → ".join(self.get_label(cell) for cell in new_path)
+        old_label_path = " -> ".join(self.get_label(cell) for cell in old_path)
+        new_label_path = " -> ".join(self.get_label(cell) for cell in new_path)
         self._log(
             EVENT_REROUTE,
             "rerouted | old: {} | new: {}".format(old_label_path, new_label_path)
@@ -832,9 +832,9 @@ class CityGraph:
         """clear the event log. useful when restarting the simulation."""
         self.event_log = []
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # debug: print the grid to terminal
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def print_grid(self):
         """
@@ -850,7 +850,7 @@ class CityGraph:
             "PowerPlant":     "Pwr",
             "AmbulanceDepot": "Dep",
         }
-        print("\n── city grid ──────────────────────────────────────")
+        print("\n-- city grid --------------------------------------")
         for row in range(self.rows):
             row_display = ""
             for col in range(self.cols):
@@ -858,14 +858,14 @@ class CityGraph:
                 abbreviation = type_abbreviations.get(cell_type, "???")
                 row_display += abbreviation + " "
             print(row_display)
-        print("────────────────────────────────────────────────────\n")
+        print("----------------------------------------------------\n")
 
     def print_risk_grid(self):
         """
         print a grid showing risk level at each node.
         h = high (>= 0.65), m = medium (0.35 to 0.65), . = low (< 0.35)
         """
-        print("\n── risk grid ───────────────────────────────────────")
+        print("\n-- risk grid ---------------------------------------")
         for row in range(self.rows):
             row_display = ""
             for col in range(self.cols):
@@ -877,21 +877,21 @@ class CityGraph:
                 else:
                     row_display += ". "
             print(row_display)
-        print("────────────────────────────────────────────────────\n")
+        print("----------------------------------------------------\n")
 
     def print_population_grid(self):
         """
         print a grid showing population density at each node.
         shows a single rounded integer per cell for readability.
         """
-        print("\n── population density grid ─────────────────────────")
+        print("\n-- population density grid -------------------------")
         for row in range(self.rows):
             row_display = ""
             for col in range(self.cols):
                 pop_value = self.graph.nodes[(row, col)]["population_density"]
                 row_display += "{:.0f} ".format(pop_value)
             print(row_display)
-        print("────────────────────────────────────────────────────\n")
+        print("----------------------------------------------------\n")
         
     def verify_hospital_depot_redundancy(self):
         """

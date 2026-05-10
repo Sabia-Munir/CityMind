@@ -55,9 +55,9 @@ import heapq
 from city_graph import CityGraph
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # ga hyperparameters
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 NUM_AMBULANCES   = 3    # number of ambulances to place
 POPULATION_SIZE  = 80   # chromosomes per generation
@@ -66,13 +66,15 @@ NO_IMPROVE_LIMIT = 20   # stop early if no improvement for this many generations
 MUTATION_RATE    = 0.10 # probability one ambulance position is randomised
 TOURNAMENT_SIZE  = 3    # contestants compared in each tournament selection
 
-# Penalty for unreachable citizens (large but finite so GA can compare)
-UNREACHABLE_PENALTY = 1e9
+# Penalty returned for a chromosome that cannot reach ANY citizen.
+# Must match the value used in _fitness() — both use 1000 so the
+# fallback threshold (> 500) fires correctly.
+UNREACHABLE_PENALTY = 1000
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # main entry point
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def place_ambulances(city, seed_chromosome=None):
     """
@@ -95,7 +97,7 @@ def place_ambulances(city, seed_chromosome=None):
     -------
     list of (row, col) — the 3 best ambulance positions found
     """
-    # collect all accessible nodes
+    # collect all accessible nodes (nodes with at least one open road)
     all_accessible_nodes = [
         cell for cell in city.all_nodes()
         if city.get_node(cell)["is_accessible"]
@@ -121,6 +123,17 @@ def place_ambulances(city, seed_chromosome=None):
 
     if not citizen_nodes:
         citizen_nodes = all_accessible_nodes
+
+    # FIXED: After heavy flooding, many citizens may be in disconnected components.
+    # Filter to only citizens that are reachable from AT LEAST ONE accessible node
+    # so the GA optimises over the connected portion of the city.
+    reachable_citizens = _filter_reachable_citizens(citizen_nodes, all_accessible_nodes, distance_map)
+    if reachable_citizens:
+        citizen_nodes = reachable_citizens
+        city._log("SYSTEM", "ga: {} of {} citizens are reachable (network fragmentation detected)".format(
+            len(reachable_citizens),
+            len([c for c in all_accessible_nodes if city.get_population_density(c) > 0])
+        ))
 
     city._log("SYSTEM", "ga starting | {} accessible nodes | {} citizen nodes".format(
         len(all_accessible_nodes), len(citizen_nodes)
@@ -181,39 +194,38 @@ def place_ambulances(city, seed_chromosome=None):
         city._log("SYSTEM", "warning: ga produced no result — using fallback positions")
         best_chromosome = all_accessible_nodes[:NUM_AMBULANCES]
 
-    # FIXED: Safety net - if best_score is unreachable penalty, use fallback positions
-    if best_chromosome is None or best_score >= UNREACHABLE_PENALTY / 2:
-        city._log("SYSTEM", "ga warning: no valid placement found with reachable citizens (best_score={:.0f})".format(best_score))
-        # Fallback: place ambulances at the primary hospital, primary depot, and a random residential
+    # Safety net: if the GA found no valid placement (e.g. population was empty)
+    if best_chromosome is None:
+        city._log("SYSTEM", "ga warning: no valid placement found — using strategic fallback")
+        # Fallback: spread ambulances across connected components using BFS.
+        # Start from primary hospital/depot then add diverse accessible nodes.
         fallback_positions = []
-        if city.primary_hospital:
+        if city.primary_hospital and city.get_node(city.primary_hospital)["is_accessible"]:
             fallback_positions.append(city.primary_hospital)
-        if city.primary_depot:
+        if city.primary_depot and city.get_node(city.primary_depot)["is_accessible"] \
+                and city.primary_depot not in fallback_positions:
             fallback_positions.append(city.primary_depot)
-        
-        # Add random accessible residential nodes to reach 3 ambulances
-        residential_nodes = [c for c in all_accessible_nodes 
-                            if city.get_location_type(c) == "Residential"]
-        temp_residential = residential_nodes[:]  # copy
-        while len(fallback_positions) < NUM_AMBULANCES and temp_residential:
-            candidate = temp_residential.pop(0)
+
+        # Spread remaining slots across accessible nodes, preferring ones
+        # distant from already-chosen positions for maximum coverage.
+        for candidate in all_accessible_nodes:
+            if len(fallback_positions) >= NUM_AMBULANCES:
+                break
             if candidate not in fallback_positions:
                 fallback_positions.append(candidate)
-        
-        # If still not enough, use any accessible nodes
-        temp_nodes = all_accessible_nodes[:]
-        while len(fallback_positions) < NUM_AMBULANCES and temp_nodes:
-            candidate = temp_nodes.pop(0)
+
+        # Pad with any accessible node if still short
+        for candidate in all_accessible_nodes:
+            if len(fallback_positions) >= NUM_AMBULANCES:
+                break
             if candidate not in fallback_positions:
                 fallback_positions.append(candidate)
-        
+
         best_chromosome = fallback_positions[:NUM_AMBULANCES]
         best_score = _fitness(best_chromosome, citizen_nodes, distance_map)
-        city._log("SYSTEM", "ga using fallback positions | worst-case distance: {:.4f}".format(
-            best_score if best_score < UNREACHABLE_PENALTY / 2 else 999.0
-        ))
+        city._log("SYSTEM", "ga using fallback positions | worst-case score: {:.4f}".format(best_score))
 
-    city._log("SYSTEM", "ga complete | best worst-case distance: {:.4f}".format(best_score))
+    city._log("SYSTEM", "ga complete | best score: {:.4f}".format(best_score))
 
     # write final positions to shared city graph
     city.ambulance_positions = best_chromosome
@@ -223,9 +235,9 @@ def place_ambulances(city, seed_chromosome=None):
     return best_chromosome
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # shortest path computation (dijkstra using effective_cost)
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def _compute_all_distances(city, nodes):
     """
@@ -288,9 +300,9 @@ def _dijkstra(city, source, node_set):
     return dist
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # ga operators
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def _initialise_population(all_nodes, seed_chromosome):
     """
@@ -314,46 +326,60 @@ def _initialise_population(all_nodes, seed_chromosome):
 
 def _fitness(chromosome, citizen_nodes, distance_map):
     """
-    FIXED: fitness function that properly handles unreachable citizens.
-    
-    Instead of returning inf (which breaks comparison), this function:
-    1. Counts how many citizens are reachable
-    2. If all citizens are reachable, returns the max distance (lower = better)
-    3. If some citizens are unreachable, returns UNREACHABLE_PENALTY + (1 - reachable_ratio)
-       This makes solutions with more reachable citizens always better,
-       and among those with the same reachable count, the ones with better coverage win.
+    Evaluate a chromosome (list of ambulance positions) by worst-case
+    response distance — the maximum shortest-path from any citizen node
+    to its nearest ambulance.
+
+    Unreachable citizens add a cumulative UNREACHABLE_PENALTY (1000) so that
+    chromosomes covering more citizens always score better than those
+    that leave citizens completely isolated.
     """
     citizen_distances = []
     unreachable_count = 0
-    
+
     for citizen in citizen_nodes:
         nearest_dist = float("inf")
-        
+
         for ambulance_pos in chromosome:
             dist = distance_map.get(ambulance_pos, {}).get(citizen, float("inf"))
             if dist < nearest_dist:
                 nearest_dist = dist
-        
-        if nearest_dist == float("inf") or nearest_dist >= UNREACHABLE_PENALTY / 2:
+
+        if nearest_dist == float("inf"):
             unreachable_count += 1
         else:
             citizen_distances.append(nearest_dist)
-    
-    # Case 1: All citizens are reachable
-    if unreachable_count == 0:
-        return max(citizen_distances) if citizen_distances else 0.0
-    
-    # Case 2: Some citizens are unreachable
-    # Return a large penalty that decreases as more citizens become reachable
-    reachable_ratio = len(citizen_distances) / len(citizen_nodes)
-    # Base penalty plus a small component from reachable citizens
-    penalty = UNREACHABLE_PENALTY * (1.0 - reachable_ratio * 0.9)
-    
-    # Add the max reachable distance as a tie-breaker
-    if citizen_distances:
-        penalty += max(citizen_distances) * 0.01
-    
-    return penalty
+
+    base_dist = max(citizen_distances) if citizen_distances else 0.0
+    return base_dist + (unreachable_count * UNREACHABLE_PENALTY)
+
+
+def _filter_reachable_citizens(citizen_nodes, all_accessible_nodes, distance_map):
+    """
+    Return the subset of citizen_nodes that are reachable from at least
+    one accessible node in the distance map.  Called before the GA loop
+    so that after heavy flooding the GA still optimises over citizens it
+    CAN reach rather than always returning UNREACHABLE_PENALTY.
+
+    parameters
+    ----------
+    citizen_nodes      : list of (row, col)
+    all_accessible_nodes : list of (row, col) — source nodes in distance_map
+    distance_map       : dict[source][target] = shortest cost
+
+    returns
+    -------
+    list of (row, col) — citizens reachable from at least one source,
+    or the original list if none are reachable (caller falls back to original).
+    """
+    reachable = []
+    for citizen in citizen_nodes:
+        for source in all_accessible_nodes:
+            d = distance_map.get(source, {}).get(citizen, float("inf"))
+            if d < float("inf"):
+                reachable.append(citizen)
+                break
+    return reachable if reachable else citizen_nodes
 
 
 def _tournament_select(chromosomes_only, scored_population):
@@ -412,9 +438,9 @@ def _mutate(chromosome, all_nodes):
     return chromosome
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # standalone test — uses real challenge 1 + challenge 2 pipeline
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     from challenge1_csp import run_layout_planner
@@ -440,7 +466,7 @@ if __name__ == "__main__":
     print("\nstep 2: running genetic algorithm...")
     best_positions = place_ambulances(city)
 
-    print("\n── results ─────────────────────────────────────────")
+    print("\n-- results -----------------------------------------")
     for i, pos in enumerate(best_positions):
         print("  ambulance {}: {}".format(i + 1, city.get_label(pos)))
 

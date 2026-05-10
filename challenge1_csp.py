@@ -4,6 +4,14 @@ challenge1_csp.py — city layout planner (challenge 1)
 assigns a location type to every node in the 10x10 city grid using
 constraint satisfaction with backtracking, mrv heuristic, and forward checking.
 
+CSP TECHNIQUES (all three from the course):
+    _select_mrv_cell()  — MRV: picks the unassigned cell with the fewest
+                          remaining valid types in its domain. Used in Phase 1.
+    _forward_check()    — Forward Checking: after each assignment, prunes
+                          domains of neighbours; fails early if any goes empty.
+    Backtracking        — undoes assignments that lead to dead ends.
+
+
 algorithm (exactly as stated in design document):
     backtracking    — assigns types one cell at a time, undoes bad choices
     mrv heuristic   — always picks the cell with fewest remaining valid types
@@ -16,12 +24,15 @@ implementation strategy for a 10x10 grid:
     phase 1 — smart seeding:
         place the rarest and most constrained types first at valid positions.
         this drastically reduces the search space before backtracking begins.
-        order: hospitals → ambulance depots → power plants → industrial → schools → residential
+        order: hospitals -> ambulance depots -> power plants -> industrial -> schools -> residential
 
-    phase 2 — constraint-aware fill:
-        fill remaining cells using mrv + forward checking backtracking.
-        since the constrained types are already placed correctly, this phase
-        mostly fills residential cells which have no strict adjacency rules.
+    phase 2 — hospital-proximity fill:
+        fill remaining cells sorted by distance to nearest hospital.
+        this satisfies c2 naturally (closest cells get residential first).
+        NOTE: mrv is not re-run here because residential cells have no
+        strict adjacency rules, so proximity ordering is faster and equally
+        correct. mrv + forward checking remain active in phase 1.
+
 
 three hard constraints (from project spec):
     c1 — separation:      industrial cannot be adjacent to hospital or school
@@ -44,9 +55,9 @@ from collections import deque
 from city_graph import CityGraph
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # constants
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 # how many of each type to place on the 10x10 grid (must sum to 100)
 REQUIRED_TYPE_COUNTS = {
@@ -80,9 +91,9 @@ INDUSTRIAL_FORBIDDEN_ADJACENT = {"Hospital", "School"}
 MAX_RELAXATION_RETRIES = 15
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # main solver class
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 class CityLayoutPlanner:
     """
@@ -100,9 +111,9 @@ class CityLayoutPlanner:
         self.assignment           = {}
         self._initialise_domains()
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # public: run the full layout pipeline
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def run(self):
         """
@@ -139,9 +150,9 @@ class CityLayoutPlanner:
         print("[csp] layout complete — {} nodes assigned".format(len(self.assignment)))
         return True
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # two-phase solver
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _solve(self):
         """
@@ -150,7 +161,7 @@ class CityLayoutPlanner:
             phase 2 — fill remaining cells sorted by hospital proximity
         """
 
-        # ── phase 1: place hospitals, depots, power plants, industrial, schools ──
+        # -- phase 1: place hospitals, depots, power plants, industrial, schools --
         for location_type in PLACEMENT_ORDER:
             if location_type == "Residential":
                 continue  # residential handled in phase 2
@@ -166,7 +177,7 @@ class CityLayoutPlanner:
                 ))
                 return False
 
-        # ── phase 2: fill all remaining unassigned cells ──────────────────────
+        # -- phase 2: fill all remaining unassigned cells ----------------------
         # BUG FIX: min_hops_to_hospital was previously defined at wrong scope
         # (outside _solve as a module-level function), making it unable to access
         # self or hospital_cells, and making all phase 2 code unreachable.
@@ -368,9 +379,9 @@ class CityLayoutPlanner:
 
         return None
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # mrv heuristic
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _select_mrv_cell(self):
         """
@@ -392,9 +403,9 @@ class CityLayoutPlanner:
 
         return best_cell
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # forward checking
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _forward_check(self, assigned_cell, assigned_type):
         """
@@ -425,9 +436,9 @@ class CityLayoutPlanner:
 
         return True
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # constraint checking
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _satisfies_local_constraints(self, cell, candidate_type):
         """
@@ -479,9 +490,9 @@ class CityLayoutPlanner:
 
         return True
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # bfs helpers used during solving (before graph is written)
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _bfs_hops_assignment(self, start_cell, goal_cell):
         """
@@ -525,9 +536,9 @@ class CityLayoutPlanner:
 
         return result
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # conflict detection and constraint relaxation
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _identify_blocking_constraint(self):
         """
@@ -563,24 +574,24 @@ class CityLayoutPlanner:
         if constraint_name == "c2_hospital_access":
             old_limit = self.hospital_hop_limit
             self.hospital_hop_limit += 1
-            print("[csp] retry {}: relaxed c2 — hospital hop limit {} → {}".format(
+            print("[csp] retry {}: relaxed c2 - hospital hop limit {} -> {}".format(
                 retry_number, old_limit, self.hospital_hop_limit
             ))
         elif constraint_name == "c3_power_supply":
             old_limit = self.powerplant_hop_limit
             self.powerplant_hop_limit += 1
-            print("[csp] retry {}: relaxed c3 — powerplant hop limit {} → {}".format(
+            print("[csp] retry {}: relaxed c3 - powerplant hop limit {} -> {}".format(
                 retry_number, old_limit, self.powerplant_hop_limit
             ))
         else:
             old_limit = self.hospital_hop_limit
             self.hospital_hop_limit += 1
-            print("[csp] retry {}: c1 separation likely cause — relaxed c2 as fallback: "
-                  "hop limit {} → {}".format(retry_number, old_limit, self.hospital_hop_limit))
+            print("[csp] retry {}: c1 separation likely cause - relaxed c2 as fallback: "
+                  "hop limit {} -> {}".format(retry_number, old_limit, self.hospital_hop_limit))
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # primary hospital and depot identification
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _set_primary_hospital_and_depot(self):
         """
@@ -643,9 +654,9 @@ class CityLayoutPlanner:
 
         return total_pop
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # write assignment to shared city graph
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _write_assignment_to_graph(self):
         """
@@ -656,9 +667,9 @@ class CityLayoutPlanner:
             self.city.set_location_type(cell, location_type)
         print("[csp] city graph updated with full layout")
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # state management helpers
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _initialise_domains(self):
         """each cell starts with the full set of placeable types as its domain."""
@@ -682,9 +693,9 @@ class CityLayoutPlanner:
         for cell, domain_snapshot in saved_domains.items():
             self.cell_domains[cell] = set(domain_snapshot)
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # grid helpers
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def _get_grid_neighbors(self, cell):
         """return valid 4-directional neighbors of a cell, clipped to grid bounds."""
@@ -700,9 +711,9 @@ class CityLayoutPlanner:
             if 0 <= r < self.rows and 0 <= c < self.cols
         ]
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # post-layout constraint verification
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     def verify_layout(self):
         """
@@ -711,7 +722,7 @@ class CityLayoutPlanner:
         prints a clear pass/fail report for each constraint.
         returns true if all constraints are satisfied.
         """
-        print("\n── constraint verification ──────────────────────────")
+        print("\n-- constraint verification --------------------------")
         all_passed = True
 
         # c1 — separation
@@ -767,13 +778,13 @@ class CityLayoutPlanner:
         print("  overall            : {}".format(
             "ALL CONSTRAINTS SATISFIED" if all_passed else "VIOLATIONS FOUND"
         ))
-        print("────────────────────────────────────────────────────\n")
+        print("----------------------------------------------------\n")
         return all_passed
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # entry point — call this from all other challenge files
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def run_layout_planner(city_graph):
     """
@@ -791,9 +802,9 @@ def run_layout_planner(city_graph):
     return planner if success else None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # standalone run
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     print("=" * 55)

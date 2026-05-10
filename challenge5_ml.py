@@ -29,9 +29,9 @@ three-step pipeline (from design document section 7):
 
     step 3 — graph integration
         after classification:
-            High   → risk_index = 0.8
-            Medium → risk_index = 0.4
-            Low    → risk_index = 0.1
+            High   -> risk_index = 0.8
+            Medium -> risk_index = 0.4
+            Low    -> risk_index = 0.1
         written to the shared city graph via city.update_risk().
         effective_cost(u,v) = base_cost × (1 + (risk_u + risk_v) / 2)
         is then computed live by get_effective_cost() — no extra wiring needed.
@@ -70,9 +70,9 @@ from sklearn.preprocessing import StandardScaler
 from city_graph import CityGraph
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # constants
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 # number of clusters for k-means (from design document)
 NUM_CLUSTERS = 4
@@ -101,9 +101,9 @@ RF_RANDOM_STATE     = 42
 CV_FOLDS            = 5      # 5-fold cross-validation
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # main entry point
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def run_risk_pipeline(city):
     """
@@ -170,9 +170,9 @@ def run_risk_pipeline(city):
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # step 1: feature extraction
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def _extract_features(city):
     """
@@ -238,9 +238,9 @@ def _bfs_hop_to_nearest(city, start_cell, target_cells):
     return float("inf")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # step 1b: k-means clustering
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def _run_kmeans(feature_matrix, n_clusters):
     """
@@ -274,9 +274,9 @@ def _run_kmeans(feature_matrix, n_clusters):
     return cluster_labels, wcss_values
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # step 2: synthetic dataset generation + random forest training
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def _train_random_forest(feature_matrix, cluster_labels):
     """
@@ -370,9 +370,9 @@ def _train_random_forest(feature_matrix, cluster_labels):
     return clf, scaler, cv_accuracy, feature_importances
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # step 3: predict and write risk to city graph
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def _predict_and_write_risk(city, all_cells, feature_matrix, cluster_labels,
                              classifier, scaler):
@@ -380,9 +380,9 @@ def _predict_and_write_risk(city, all_cells, feature_matrix, cluster_labels,
     run the trained classifier on all nodes and write risk_index to city graph.
 
     risk index values (from design document):
-        High   → 0.8
-        Medium → 0.4
-        Low    → 0.1
+        High   -> 0.8
+        Medium -> 0.4
+        Low    -> 0.1
 
     these are written via city.update_risk() which clamps to [0.0, 1.0]
     and logs every update to the event log.
@@ -422,9 +422,9 @@ def _predict_and_write_risk(city, all_cells, feature_matrix, cluster_labels,
     return risk_predictions
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # utility: print risk breakdown per location type
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def print_risk_breakdown(city, risk_predictions):
     """
@@ -438,7 +438,7 @@ def print_risk_breakdown(city, risk_predictions):
         loc_type = city.get_location_type(cell)
         breakdown[loc_type][label] += 1
 
-    print("\n── risk breakdown by location type ─────────────────────")
+    print("\n-- risk breakdown by location type ---------------------")
     print("  {:15s}  {:>6s}  {:>7s}  {:>5s}".format("Type", "High", "Medium", "Low"))
     print("  " + "-" * 38)
     for loc_type in sorted(breakdown.keys()):
@@ -446,7 +446,7 @@ def print_risk_breakdown(city, risk_predictions):
         print("  {:15s}  {:>6d}  {:>7d}  {:>5d}".format(
             loc_type, counts["High"], counts["Medium"], counts["Low"]
         ))
-    print("────────────────────────────────────────────────────────\n")
+    print("--------------------------------------------------------\n")
 
 
 def print_elbow_curve(wcss_values):
@@ -454,17 +454,17 @@ def print_elbow_curve(wcss_values):
     display the elbow curve in the terminal so k=4 choice is demonstrable
     without requiring matplotlib during the viva.
     """
-    print("\n── k-means elbow curve (wcss per k) ───────────────────")
+    print("\n-- k-means elbow curve (wcss per k) -------------------")
     for k, wcss in enumerate(wcss_values, start=1):
         bar_len = int(wcss / max(wcss_values) * 30)
         marker  = " ← chosen" if k == NUM_CLUSTERS else ""
         print("  k={} | {:6.2f} | {}{}".format(k, wcss, "█" * bar_len, marker))
-    print("────────────────────────────────────────────────────────\n")
+    print("--------------------------------------------------------\n")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # standalone test — uses real challenge 1 + 2 pipeline
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import random
@@ -486,14 +486,14 @@ if __name__ == "__main__":
     print("\nbuilding road network (challenge 2)...")
     build_road_network(city)
 
-    print("\n── running ml risk pipeline ────────────────────────────")
+    print("\n-- running ml risk pipeline ----------------------------")
     result = run_risk_pipeline(city)
 
-    # ── display results ───────────────────────────────────────────────────────
-    print("\n── cross-validation accuracy ───────────────────────────")
+    # -- display results -------------------------------------------------------
+    print("\n-- cross-validation accuracy ---------------------------")
     print("  cv_accuracy (5-fold): {:.4f}".format(result["cv_accuracy"]))
 
-    print("\n── feature importances ─────────────────────────────────")
+    print("\n-- feature importances ---------------------------------")
     fi = result["feature_importances"]
     labels = ["population_density", "industrial_proximity", "cluster_label"]
     for name, importance in zip(labels, fi):
@@ -503,11 +503,11 @@ if __name__ == "__main__":
     print_elbow_curve(result["wcss_values"])
     print_risk_breakdown(city, result["risk_predictions"])
 
-    print("── risk grid after ml pipeline ─────────────────────────")
+    print("-- risk grid after ml pipeline -------------------------")
     city.print_risk_grid()
 
-    # ── verify effective cost changed ─────────────────────────────────────────
-    print("── effective cost sample (first 5 edges) ───────────────")
+    # -- verify effective cost changed -----------------------------------------
+    print("-- effective cost sample (first 5 edges) ---------------")
     edge_count = 0
     for u, v, data in city.get_all_edges():
         if edge_count >= 5:
@@ -519,7 +519,7 @@ if __name__ == "__main__":
             ))
             edge_count += 1
 
-    # ── assertions ────────────────────────────────────────────────────────────
+    # -- assertions ------------------------------------------------------------
     all_nodes = city.all_nodes()
 
     # all risk_index values must be one of the three defined values
@@ -568,8 +568,8 @@ if __name__ == "__main__":
             "ERROR: high-risk group does not have higher risk indices than low-risk group"
         print("  high-risk nodes have higher risk_index than low-risk nodes")
 
-    # ── simulate re-run at step 5 ─────────────────────────────────────────────
-    print("\n── simulating step-5 re-run ────────────────────────────")
+    # -- simulate re-run at step 5 ---------------------------------------------
+    print("\n-- simulating step-5 re-run ----------------------------")
     city.set_simulation_step(5)
     result2 = run_risk_pipeline(city)
     assert len(result2["risk_predictions"]) == len(all_nodes)

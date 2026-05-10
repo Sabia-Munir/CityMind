@@ -21,6 +21,9 @@ from challenge3_ga import place_ambulances
 from challenge4_astar import run_emergency_routing
 from challenge5_ml import run_risk_pipeline
 
+# Import simulation helpers from main (flood generator, civilian picker)
+from main import generate_flood_events, pick_civilians, _unblock_random_roads
+
 
 # =============================================================================
 # CONSTANTS - ADJUSTED FOR LARGER, CLEARER VISUALIZATION
@@ -95,6 +98,7 @@ SIMULATION_SETTINGS = {
     'RISK_REFRESH_EVERY': 5,
     'NUM_CIVILIANS': 6,
     'MAX_FLOODS_PER_STEP': 2,
+    'RANDOM_SEED': 42,
 }
 
 
@@ -346,17 +350,23 @@ class CityMindUI:
         self.is_running = False
         self.is_paused = False
         self.current_step = 0
-        
+
+        # Simulation tracking (matches main.py state)
+        self.civilians     = []        # current list of civilian nodes
+        self.team_position = None      # current team position (starts at depot)
+        self.current_path  = []        # last A* full path — drawn on grid
+        self.sim_rng       = random.Random(SIMULATION_SETTINGS['RANDOM_SEED'])
+
         # UI state
         self.show_roads = True
         self.show_ambulances = True
         self.show_risk = False
         self.selected_cell = None
         self.hovered_cell = None
-        
+
         # Statistics
         self.stats = {
-            'visited': 0, 'unreachable': 0, 'reroutes': 0, 
+            'visited': 0, 'unreachable': 0, 'reroutes': 0,
             'total_cost': 0.0, 'floods': 0
         }
         
@@ -390,40 +400,55 @@ class CityMindUI:
         self.btn_risk = Button3D(panel_x + 20, y_offset + 104, button_width, button_height, "🔥 TOGGLE RISK", self.font_normal)
     
     def _init_city(self):
-        """Initialize the city graph and run all challenges."""
+        """Initialize the city graph and run all 5 challenges (same order as main.py)."""
         self.city = CityGraph(rows=GRID_SIZE, cols=GRID_SIZE)
-        self.event_log.add_line("[SYSTEM] 🏙️ CityMind initialised...")
-        
-        # Challenge 1: Layout
-        self.event_log.add_line("[CHALLENGE 1] 🏗️ Running city layout planner...")
+        self.sim_rng = random.Random(SIMULATION_SETTINGS['RANDOM_SEED'])
+        self.current_path = []
+        self.event_log.add_line("[SYSTEM] CityMind initialising...")
+
+        # Challenge 1: CSP City Layout
+        self.event_log.add_line("[CH1-CSP] Running city layout planner...")
         planner = run_layout_planner(self.city)
         if planner is None:
-            self.event_log.add_line("[ERROR] ❌ Challenge 1 failed!")
+            self.event_log.add_line("[ERROR] Challenge 1 failed!")
             return
-        self.event_log.add_line("[CHALLENGE 1] ✅ Layout complete")
-        
-        # Challenge 2: Road Network
-        self.event_log.add_line("[CHALLENGE 2] 🛣️ Building road network...")
+        self.event_log.add_line("[CH1-CSP] Layout complete — hospital & depot placed")
+
+        # Challenge 2: MST Road Network
+        self.event_log.add_line("[CH2-MST] Building minimum spanning tree road network...")
         road_result = build_road_network(self.city)
         if not road_result:
-            self.event_log.add_line("[ERROR] ❌ Challenge 2 failed!")
+            self.event_log.add_line("[ERROR] Challenge 2 failed!")
             return
-        self.event_log.add_line(f"[CHALLENGE 2] ✅ {len(road_result['mst_edges'])} roads built, cost: {road_result['total_cost']:.2f}")
-        
-        # Challenge 5: Initial Risk
-        self.event_log.add_line("[CHALLENGE 5] 🤖 Running ML risk prediction...")
+        self.event_log.add_line(
+            f"[CH2-MST] {len(road_result['mst_edges'])} roads | "
+            f"cost:{road_result['total_cost']:.1f} | "
+            f"redundancy:{'YES' if road_result['redundant_edge'] else 'NO'}"
+        )
+
+        # Challenge 5: Initial ML Risk Prediction
+        self.event_log.add_line("[CH5-ML] Running K-Means + Random Forest risk pipeline...")
         ml_result = run_risk_pipeline(self.city)
         if ml_result:
-            self.event_log.add_line(f"[CHALLENGE 5] ✅ Risk complete (CV: {ml_result['cv_accuracy']:.2f})")
-        
-        # Challenge 3: Ambulance Placement
-        self.event_log.add_line("[CHALLENGE 3] 🚑 Placing ambulances...")
+            self.event_log.add_line(
+                f"[CH5-ML] Risk complete | CV accuracy: {ml_result['cv_accuracy']:.2f}"
+            )
+
+        # Challenge 3: GA Ambulance Placement
+        self.event_log.add_line("[CH3-GA] Running genetic algorithm for ambulance placement...")
         positions = place_ambulances(self.city)
         if positions:
             self.city.ambulance_positions = positions
-            self.event_log.add_line("[CHALLENGE 3] ✅ 3 ambulances placed")
-        
-        self.event_log.add_line("[SYSTEM] ✅ Ready! Press PLAY to start simulation.")
+            self.event_log.add_line(f"[CH3-GA] 3 ambulances placed optimally")
+
+        # Initial civilian selection & team position
+        self.civilians     = self._pick_civilians()
+        self.team_position = self.city.primary_depot
+        self.event_log.add_line(
+            f"[SIM] Team starts at {self.city.get_label(self.team_position)} | "
+            f"{len(self.civilians)} civilians to rescue"
+        )
+        self.event_log.add_line("[SYSTEM] Ready! Press PLAY to start simulation.")
     
     def _world_to_screen(self, grid_x, grid_y):
         """Convert grid coordinates to isometric screen coordinates - centered for larger grid."""
@@ -505,10 +530,35 @@ class CityMindUI:
         if self.show_roads:
             for x1, y1, x2, y2, is_blocked in road_segments:
                 color = COLORS['ROAD_FLOODED'] if is_blocked else COLORS['ROAD_NORMAL']
-                draw_3d_road(self.screen, x1, y1, x2, y2, color, 
-                            width=6 if is_blocked else 4, 
-                            is_flooded=is_blocked, 
+                draw_3d_road(self.screen, x1, y1, x2, y2, color,
+                            width=6 if is_blocked else 4,
+                            is_flooded=is_blocked,
                             animation=self.animation_frame)
+
+        # -- Draw A* path (bright green overlay) ------------------------------
+        # Shows the last computed team route so the viewer can see A* in action.
+        if self.current_path and len(self.current_path) > 1:
+            for i in range(len(self.current_path) - 1):
+                n1 = self.current_path[i]
+                n2 = self.current_path[i + 1]
+                x1, y1 = self._world_to_screen(n1[0], n1[1])
+                x2, y2 = self._world_to_screen(n2[0], n2[1])
+                cx1 = x1 + CELL_SIZE // 2
+                cy1 = y1 + CELL_HEIGHT // 2
+                cx2 = x2 + CELL_SIZE // 2
+                cy2 = y2 + CELL_HEIGHT // 2
+                # Glowing path line
+                pygame.draw.line(self.screen, (0, 255, 120), (cx1, cy1), (cx2, cy2), 5)
+                pygame.draw.line(self.screen, (180, 255, 210), (cx1, cy1), (cx2, cy2), 2)
+
+        # -- Draw team position marker -----------------------------------------
+        if self.team_position:
+            tx, ty = self._world_to_screen(self.team_position[0], self.team_position[1])
+            tcx = tx + CELL_SIZE // 2
+            tcy = ty + CELL_HEIGHT // 2
+            pulse = int(abs(math.sin(self.animation_frame * 0.15)) * 8)
+            pygame.draw.circle(self.screen, (255, 220, 0), (tcx, tcy), 14 + pulse, 3)
+            pygame.draw.circle(self.screen, (255, 255, 180), (tcx, tcy), 7)
         
         # Draw ambulances on top
         if self.show_ambulances and self.city.ambulance_positions:
@@ -698,14 +748,19 @@ class CityMindUI:
             self.is_paused = False
             self.current_step = 0
             self.stats = {'visited': 0, 'unreachable': 0, 'reroutes': 0, 'total_cost': 0.0, 'floods': 0}
-            self.event_log.add_line("[SIMULATION] 🚀 Started! Running 20 steps...")
+            self.current_path  = []
+            self.sim_rng       = random.Random(SIMULATION_SETTINGS['RANDOM_SEED'])
+            self.team_position = self.city.primary_depot
+            self.civilians     = self._pick_civilians()
+            self.event_log.add_line("[SIM] Started! Running 20 steps...")
     
     def _stop_simulation(self):
         """Stop simulation."""
         self.is_running = False
         self.is_paused = False
-        self.event_log.add_line("[SIMULATION] ⏹️ Stopped.")
-    
+        self.current_path = []
+        self.event_log.add_line("[SIM] Stopped.")
+
     def _reset_simulation(self):
         """Reset simulation to initial state."""
         self.is_running = False
@@ -713,65 +768,121 @@ class CityMindUI:
         self._init_city()
         self.current_step = 0
         self.stats = {'visited': 0, 'unreachable': 0, 'reroutes': 0, 'total_cost': 0.0, 'floods': 0}
+        self.current_path  = []
+        self.team_position = self.city.primary_depot if self.city else None
         self.selected_cell = None
-        self.event_log.add_line("[SIMULATION] 🔄 Reset complete.")
+        self.event_log.add_line("[SIM] Reset complete.")
     
+    def _pick_civilians(self):
+        """Pick civilians using the same logic as main.py."""
+        return pick_civilians(
+            self.city,
+            SIMULATION_SETTINGS['NUM_CIVILIANS'],
+            self.sim_rng
+        )
+
     def _step_simulation(self):
-        """Execute one simulation step."""
+        """
+        Execute one simulation step — mirrors main.py exactly:
+          Step 1: generate_flood_events()      (flood before routing)
+          Step 2: run_emergency_routing()       (A* nearest-first, reroutes on flood)
+          Step 3: every 5 steps — ML + GA      (risk refresh + ambulance reposition)
+          Step 4: every 3 steps — road recovery (unblock 0-1 roads)
+        """
         if not self.is_running:
             self.is_running = True
             self.current_step = 0
-        
+
         if self.current_step >= 20:
-            self.event_log.add_line("[SIMULATION] 🏁 Simulation complete! Press STOP to reset.")
+            self.event_log.add_line("[SIM] Simulation complete! Press STOP to reset.")
             return
-        
+
         self.current_step += 1
         self.city.set_simulation_step(self.current_step)
-        
-        rng = random.Random(self.current_step)
-        
-        # Generate flood events
-        unblocked_edges = [(a, b) for a, b, d in self.city.get_all_edges() if not d["blocked"]]
-        if unblocked_edges:
-            num_floods = min(rng.randint(0, SIMULATION_SETTINGS['MAX_FLOODS_PER_STEP']), 
-                           len(unblocked_edges))
-            for _ in range(num_floods):
-                a, b = rng.choice(unblocked_edges)
-                self.city.block_road(a, b)
-                self.stats['floods'] += 1
-                if num_floods > 0:
-                    self.event_log.add_line(f"[FLOOD] 🌊 Road flooded: {self.city.get_label(a)} ↔ {self.city.get_label(b)}")
-        
-        # Run emergency routing
-        if self.city.ambulance_positions and self.city.primary_hospital:
-            residential = [c for c in self.city.nodes_of_type("Residential") 
-                         if self.city.get_node(c)["is_accessible"]]
-            if residential:
-                civilians = rng.sample(residential, min(SIMULATION_SETTINGS['NUM_CIVILIANS'], len(residential)))
-                result = run_emergency_routing(
-                    self.city,
-                    civilian_nodes=civilians,
-                    start_node=self.city.ambulance_positions[0],
-                    flood_schedule=[]
+
+        # -- STEP 1: Flood events (design doc step 1) --------------------------
+        flooded = generate_flood_events(self.city, self.sim_rng)
+        if flooded:
+            self.stats['floods'] += len(flooded)
+            for fa, fb in flooded:
+                self.event_log.add_line(
+                    f"[FLOOD] Road blocked: {self.city.get_label(fa)} <-> {self.city.get_label(fb)}"
                 )
-                if result:
-                    self.stats['visited'] += len(result.get("visited", []))
-                    self.stats['unreachable'] += len(result.get("unreachable", []))
-                    self.stats['reroutes'] += result.get("reroutes", 0)
-                    self.stats['total_cost'] += result.get("total_cost", 0)
-        
-        self.event_log.add_line(f"[SIMULATION] 📍 Step {self.current_step}/20 complete | Visited: {self.stats['visited']} | Cost: {self.stats['total_cost']:.2f}")
-        
-        # Refresh challenges every 5 steps
+        else:
+            self.event_log.add_line(f"[STEP {self.current_step:02d}] No floods this step")
+
+        # -- STEP 2: A* Emergency Routing (design doc step 2) -----------------
+        # Team uses nearest-first ordering; reroutes automatically on flood.
+        self.current_path = []
+        if self.civilians and self.team_position:
+            result = run_emergency_routing(
+                city           = self.city,
+                civilian_nodes = self.civilians,
+                start_node     = self.team_position,
+                flood_schedule = []
+            )
+            if result:
+                self.stats['visited']     += len(result.get("visited", []))
+                self.stats['unreachable'] += len(result.get("unreachable", []))
+                self.stats['reroutes']    += result.get("reroutes", 0)
+                self.stats['total_cost']  += result.get("total_cost", 0.0)
+
+                # Update team position
+                if result["visited"]:
+                    self.team_position = result["visited"][-1]
+                elif result["full_path"]:
+                    self.team_position = result["full_path"][-1]
+
+                # Store path for grid visualization
+                self.current_path = result.get("full_path", [])
+
+                if result.get("reroutes", 0) > 0:
+                    self.event_log.add_line(
+                        f"[CH4-A*] REROUTED x{result['reroutes']} | "
+                        f"visited={len(result['visited'])} | cost={result['total_cost']:.2f}"
+                    )
+                else:
+                    self.event_log.add_line(
+                        f"[CH4-A*] visited={len(result['visited'])} | "
+                        f"unreachable={len(result['unreachable'])} | "
+                        f"cost={result['total_cost']:.2f}"
+                    )
+            else:
+                self.event_log.add_line("[CH4-A*] Routing failed — no civilians reachable")
+
+        self.event_log.add_line(
+            f"[STEP {self.current_step:02d}/20] visited={self.stats['visited']} | "
+            f"reroutes={self.stats['reroutes']} | cost={self.stats['total_cost']:.1f}"
+        )
+
+        # -- STEP 3: Every 5 steps — Intelligence Refresh + Strategic Realignment
         if self.current_step % SIMULATION_SETTINGS['RISK_REFRESH_EVERY'] == 0:
-            self.event_log.add_line("[CHALLENGE 5] 🔄 Refreshing risk predictions...")
-            run_risk_pipeline(self.city)
-            self.event_log.add_line("[CHALLENGE 3] 🔄 Repositioning ambulances...")
-            new_positions = place_ambulances(self.city, seed_chromosome=list(self.city.ambulance_positions))
+            # Re-select civilians
+            self.civilians = self._pick_civilians()
+            self.event_log.add_line(
+                f"[CH5-ML] Refreshing risk scores (step {self.current_step})..."
+            )
+            ml_result = run_risk_pipeline(self.city)
+            if ml_result:
+                self.event_log.add_line(
+                    f"[CH5-ML] Risk refreshed | CV: {ml_result['cv_accuracy']:.2f}"
+                )
+            self.event_log.add_line("[CH3-GA] Repositioning ambulances (warm start)...")
+            new_positions = place_ambulances(
+                self.city,
+                seed_chromosome=list(self.city.ambulance_positions)
+            )
             if new_positions:
                 self.city.ambulance_positions = new_positions
-                self.event_log.add_line("[CHALLENGE 3] ✅ Ambulances repositioned")
+                self.event_log.add_line("[CH3-GA] Ambulances repositioned")
+
+        # -- STEP 4: Road recovery every 3 steps ------------------------------
+        if self.current_step % 3 == 0:
+            unblocked = _unblock_random_roads(self.city, self.sim_rng, max_unblocks=2)
+            if unblocked > 0:
+                self.event_log.add_line(
+                    f"[FLOOD] {unblocked} road(s) unblocked (flood receding)"
+                )
     
     def run(self):
         """Main game loop."""
