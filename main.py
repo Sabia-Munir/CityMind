@@ -29,130 +29,14 @@ from challenge2_mst   import build_road_network
 from challenge3_ga    import place_ambulances
 from challenge4_astar import run_emergency_routing
 from challenge5_ml    import run_risk_pipeline
-
-
-# -----------------------------------------------------------------------------
-# simulation settings
-# -----------------------------------------------------------------------------
-
-RANDOM_SEED         = 4
-TOTAL_STEPS         = 20
-RISK_REFRESH_EVERY  = 5
-MAX_FLOODS_PER_STEP = 2      # max 2 roads flood per step (from design doc)
-NUM_CIVILIANS       = 6
+import config
 
 
 # -----------------------------------------------------------------------------
 # helpers
 # -----------------------------------------------------------------------------
 
-def pick_civilians(city, count, rng):
-    """
-    Randomly select `count` accessible residential nodes as trapped civilians.
-    Prefers residential zones; falls back to any accessible node if needed.
-    """
-    residential_accessible = [
-        cell for cell in city.nodes_of_type("Residential")
-        if city.get_node(cell)["is_accessible"]
-    ]
-    if len(residential_accessible) >= count:
-        return rng.sample(residential_accessible, count)
-    any_accessible = [
-        cell for cell in city.all_nodes()
-        if city.get_node(cell)["is_accessible"]
-    ]
-    return rng.sample(any_accessible, min(count, len(any_accessible)))
-
-
-def generate_flood_events(city, rng):
-    """
-    Randomly block up to MAX_FLOODS_PER_STEP edges to simulate flooding.
-    Implements design-doc section 9, step 1:
-        'The Flood Event Generator selects 0-2 edges to block.
-         Blocked edges are immediately flagged as impassable.'
-    The hospital-depot redundancy edge is NEVER blocked (safety rule).
-    """
-    unblocked_edges = []
-    for a, b, data in city.get_all_edges():
-        if data["blocked"]:
-            continue
-        # Never block the critical hospital-depot redundancy edge
-        if (a == city.primary_hospital and b == city.primary_depot) or \
-           (a == city.primary_depot and b == city.primary_hospital):
-            continue
-        unblocked_edges.append((a, b))
-
-    if not unblocked_edges:
-        return []
-
-    num_floods    = min(rng.randint(0, MAX_FLOODS_PER_STEP), len(unblocked_edges))
-    flooded_edges = rng.sample(unblocked_edges, num_floods)
-
-    flooded = []
-    for a, b in flooded_edges:
-        # We don't block it here! We let the A* router block it mid-journey
-        flooded.append((a, b))
-    return flooded
-
-
-def _unblock_random_roads(city, rng, max_unblocks=1):
-    """
-    Unblock some flooded roads to simulate flood waters receding.
-    Intelligent recovery strategy: evaluates candidate edges by how many
-    additional nodes they make accessible from the primary depot/hospital.
-    """
-    blocked_edges = city.get_blocked_edges()
-
-    critical_edge = None
-    if city.primary_hospital and city.primary_depot:
-        if ((city.primary_hospital, city.primary_depot) in blocked_edges or
-                (city.primary_depot, city.primary_hospital) in blocked_edges):
-            critical_edge = (city.primary_hospital, city.primary_depot)
-
-    available_edges = [
-        e for e in blocked_edges
-        if e != critical_edge and (e[1], e[0]) != critical_edge
-    ]
-    if not available_edges:
-        return 0
-
-    num_unblocks = min(rng.randint(1, max_unblocks), len(available_edges))
-    if num_unblocks == 0:
-        return 0
-
-    # Evaluate edges based on reachability improvement
-    def get_reachability(edge):
-        a, b = edge
-        # Temporarily unblock
-        city.unblock_road(a, b)
-        
-        # Count reachable nodes from primary depot
-        from collections import deque
-        start = city.primary_depot if city.primary_depot else city.all_nodes()[0]
-        visited = {start}
-        queue = deque([start])
-        while queue:
-            curr = queue.popleft()
-            # use get_open_neighbors_with_cost because it respects blocked status
-            for nbr, cost in city.get_open_neighbors_with_cost(curr):
-                if cost < float('inf') and nbr not in visited:
-                    visited.add(nbr)
-                    queue.append(nbr)
-                    
-        # Re-block
-        city.block_road(a, b)
-        return len(visited)
-
-    # Sort edges by reachability (descending), then random to break ties
-    rng.shuffle(available_edges)
-    available_edges.sort(key=get_reachability, reverse=True)
-
-    edges_to_unblock = available_edges[:num_unblocks]
-    for a, b in edges_to_unblock:
-        city.unblock_road(a, b)
-
-    return len(edges_to_unblock)
-
+from helpers import generate_flood_events, pick_civilians, _unblock_random_roads
 
 def count_risk_levels(risk_predictions):
     high   = sum(1 for v in risk_predictions.values() if v == "High")
@@ -170,7 +54,7 @@ def print_section(title):
 
 def print_step_header(step):
     print("\n-- step {:02d} / {:02d} ---------------------------------------------------".format(
-        step, TOTAL_STEPS
+        step, config.TOTAL_STEPS
     ))
 
 
@@ -179,8 +63,8 @@ def print_step_header(step):
 # -----------------------------------------------------------------------------
 
 def main():
-    random.seed(RANDOM_SEED)
-    rng = random.Random(RANDOM_SEED)
+    random.seed(config.RANDOM_SEED)
+    rng = random.Random(config.RANDOM_SEED)
 
     print_section("citymind — integrated 20-step simulation")
 
@@ -238,7 +122,7 @@ def main():
         print("[main]   ambulance {}: {}".format(i, city.get_label(pos)))
 
     # -- initial civilian selection ---------------------------------------------
-    civilians = pick_civilians(city, NUM_CIVILIANS, rng)
+    civilians = pick_civilians(city, config.NUM_CIVILIANS, rng)
     print("\n[main] initial civilians selected:")
     for i, civ in enumerate(civilians, 1):
         print("  civilian {}: {}".format(i, city.get_label(civ)))
@@ -258,9 +142,9 @@ def main():
     # -------------------------------------------------------------------------
     # 20-step simulation loop
     # -------------------------------------------------------------------------
-    print_section("simulation — steps 1 to {}".format(TOTAL_STEPS))
+    print_section("simulation — steps 1 to {}".format(config.TOTAL_STEPS))
 
-    for step in range(1, TOTAL_STEPS + 1):
+    for step in range(1, config.TOTAL_STEPS + 1):
         city.set_simulation_step(step)
         print_step_header(step)
 
@@ -287,7 +171,7 @@ def main():
         # FIXED: pick fresh civilians every step from currently accessible nodes.
         # Reusing stale civilians caused the team to retry the same unreachable
         # targets for multiple steps after flooding fragmented the graph.
-        civilians = pick_civilians(city, NUM_CIVILIANS, rng)
+        civilians = pick_civilians(city, config.NUM_CIVILIANS, rng)
 
         if civilians:
             # FIXED: validate team_position before routing.
@@ -345,10 +229,10 @@ def main():
         #   "Every 5 simulation steps (5,10,15,20), the ML pipeline re-analyses
         #    neighbourhood data. Whenever risk scores shift, the GA re-evaluates
         #    ambulance positions using a warm start."
-        if step % RISK_REFRESH_EVERY == 0:
+        if step % config.RISK_REFRESH_EVERY == 0:
 
             # 3a. re-select civilians for the next cycle
-            civilians = pick_civilians(city, NUM_CIVILIANS, rng)
+            civilians = pick_civilians(city, config.NUM_CIVILIANS, rng)
             if civilians:
                 print("[main] step {:02d}: civilians refreshed:".format(step))
                 for i, civ in enumerate(civilians, 1):
@@ -385,6 +269,8 @@ def main():
                 print("[main] step {:02d}: flood recovery — {} road(s) unblocked".format(
                     step, unblocked
                 ))
+                
+        step_logs = ["[{}] {}".format(e['category'], e['message']) for e in city.get_log() if e["step"] == step]
 
     # -------------------------------------------------------------------------
     # final summary
@@ -393,7 +279,7 @@ def main():
 
     blocked_roads = sum(1 for _, _, data in city.get_all_edges() if data["blocked"])
 
-    print("  total steps           : {}".format(TOTAL_STEPS))
+    print("  total steps           : {}".format(config.TOTAL_STEPS))
     print("  total flood events    : {}".format(len(all_floods)))
     print("  roads blocked (final) : {}".format(blocked_roads))
     print("  civilians visited     : {}".format(total_visited))
@@ -438,4 +324,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()                    # Run console simulation first
+    print("\n" + "="*62)
+    print(" LAUNCHING CITYMIND GUI...")
+    print("="*62 + "\n")
+    
+    from ui import CityMindUI   # Launch GUI after console
+    gui = CityMindUI()
+    gui.run()
+
