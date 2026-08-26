@@ -1,5 +1,4 @@
-"""
-challenge3_ga.py — ambulance placement via genetic algorithm (challenge 3)
+"""ambulance placement via genetic algorithm (challenge 3)
 ==========================================================================
 goal: position 3 ambulances on the city grid so that the worst-case
 response time — the distance from the farthest citizen to the nearest
@@ -57,8 +56,6 @@ from city_graph import CityGraph
 
 # -----------------------------------------------------------------------------
 # ga hyperparameters
-# -----------------------------------------------------------------------------
-
 NUM_AMBULANCES   = 3    # number of ambulances to place
 POPULATION_SIZE  = 80   # chromosomes per generation
 MAX_GENERATIONS  = 200  # maximum generations to run
@@ -68,17 +65,13 @@ TOURNAMENT_SIZE  = 3    # contestants compared in each tournament selection
 
 # Penalty returned for a chromosome that cannot reach ANY citizen.
 # Must match the value used in _fitness() — both use 1000 so the
-# fallback threshold (> 500) fires correctly.
+# fallback threshold (> 500) fires correctly
 UNREACHABLE_PENALTY = 1000
 
 
-# -----------------------------------------------------------------------------
-# main entry point
-# -----------------------------------------------------------------------------
-
 def place_ambulances(city, seed_chromosome=None):
     """
-    run the genetic algorithm to place NUM_AMBULANCES ambulances on the grid.
+    run the genetic algorithm to place NUM_AMBULANCES ambulances on the grid
 
     the fitness function minimizes the worst-case response distance —
     the maximum shortest-path distance from any citizen node to its
@@ -87,15 +80,6 @@ def place_ambulances(city, seed_chromosome=None):
     risk scores from challenge 5 are automatically included because
     dijkstra uses get_open_neighbors_with_cost() which reads effective_cost
     live from the shared graph. no extra wiring needed.
-
-    parameters
-    ----------
-    city            : CityGraph — shared graph with roads built by challenge 2
-    seed_chromosome : list of (row,col) or None — warm start for re-runs
-
-    returns
-    -------
-    list of (row, col) — the 3 best ambulance positions found
     """
     # collect all accessible nodes (nodes with at least one open road)
     all_accessible_nodes = [
@@ -108,14 +92,14 @@ def place_ambulances(city, seed_chromosome=None):
         city.ambulance_positions = all_accessible_nodes[:NUM_AMBULANCES]
         return city.ambulance_positions
 
-    # pre-compute all-pairs shortest paths once before the ga loop.
+    # pre-compute all-pairs shortest paths once before the ga loop
     # recomputing inside every fitness call across 200 generations x 80
     # chromosomes would be far too slow.
     city._log("SYSTEM", "pre-computing all-pairs shortest paths for ga fitness...")
     distance_map = _compute_all_distances(city, all_accessible_nodes)
 
-    # citizen nodes: nodes with population > 0 that ambulances must cover.
-    # uses real population values set by challenge 1 — not a hardcoded list.
+    # citizen nodes: nodes with population > 0 that ambulances must cover
+    # uses real population values set by challenge 1  not a hardcoded list
     citizen_nodes = [
         cell for cell in all_accessible_nodes
         if city.get_population_density(cell) > 0
@@ -124,7 +108,7 @@ def place_ambulances(city, seed_chromosome=None):
     if not citizen_nodes:
         citizen_nodes = all_accessible_nodes
 
-    # FIXED: After heavy flooding, many citizens may be in disconnected components.
+    # After heavy flooding, many citizens may be in disconnected components.
     # Filter to only citizens that are reachable from AT LEAST ONE accessible node
     # so the GA optimises over the connected portion of the city.
     reachable_citizens = _filter_reachable_citizens(citizen_nodes, all_accessible_nodes, distance_map)
@@ -188,13 +172,13 @@ def place_ambulances(city, seed_chromosome=None):
 
         population = next_population
 
-    # safety net: if the loop never ran (MAX_GENERATIONS=0) or population
+    #if the loop never ran (MAX_GENERATIONS=0) or population
     # was empty, fall back to the first accessible nodes.
     if best_chromosome is None:
         city._log("SYSTEM", "warning: ga produced no result — using fallback positions")
         best_chromosome = all_accessible_nodes[:NUM_AMBULANCES]
 
-    # Safety net: if the GA found no valid placement (e.g. population was empty)
+    #if the GA found no valid placement (e.g. population was empty)
     if best_chromosome is None:
         city._log("SYSTEM", "ga warning: no valid placement found — using strategic fallback")
         # Fallback: spread ambulances across connected components using BFS.
@@ -237,14 +221,13 @@ def place_ambulances(city, seed_chromosome=None):
 
 # -----------------------------------------------------------------------------
 # shortest path computation (dijkstra using effective_cost)
-# -----------------------------------------------------------------------------
 
 def _compute_all_distances(city, nodes):
     """
-    run dijkstra from every node and store all pairwise distances.
+    run dijkstra from every node and store all pairwise distances
 
     uses effective_cost (not base_cost) so risk scores from challenge 5
-    are automatically factored into ambulance placement.
+    are automatically factored into ambulance placement
 
     parameters
     ----------
@@ -265,9 +248,9 @@ def _compute_all_distances(city, nodes):
 
 def _dijkstra(city, source, node_set):
     """
-    dijkstra from source to all nodes in node_set.
+    dijkstra from source to all nodes in node_set
     uses get_open_neighbors_with_cost() from the shared city graph
-    so risk-weighted effective costs are used automatically.
+    so risk-weighted effective costs are used automatically
 
     parameters
     ----------
@@ -360,17 +343,6 @@ def _filter_reachable_citizens(citizen_nodes, all_accessible_nodes, distance_map
     one accessible node in the distance map.  Called before the GA loop
     so that after heavy flooding the GA still optimises over citizens it
     CAN reach rather than always returning UNREACHABLE_PENALTY.
-
-    parameters
-    ----------
-    citizen_nodes      : list of (row, col)
-    all_accessible_nodes : list of (row, col) — source nodes in distance_map
-    distance_map       : dict[source][target] = shortest cost
-
-    returns
-    -------
-    list of (row, col) — citizens reachable from at least one source,
-    or the original list if none are reachable (caller falls back to original).
     """
     reachable = []
     for citizen in citizen_nodes:
