@@ -1,83 +1,19 @@
-"""
-challenge2_mst.py — road network optimization (challenge 2)
-============================================================
-goal: connect all 100 city locations using the minimum total road cost.
-safety rule: the primary hospital and primary ambulance depot must always
-have at least two completely independent (edge-disjoint) paths between them
-so that one flood cannot cut off the medical corridor.
-
-algorithm: kruskal's minimum spanning tree + redundancy step
-    step 1 — collect all possible roads and sort by cost
-    step 2 — kruskal builds the cheapest connected network (mst)
-    step 3 — check if hospital and depot already have 2 edge-disjoint paths
-    step 4 — if not, find and add the single cheapest extra road that
-              creates the second independent path
-
-why kruskal over alternatives:
-    - dijkstra / a* / bfs: find paths between two nodes only, cannot
-      design a full city-wide network
-    - prim's mst: also valid but kruskal's edge-sorted approach makes
-      the redundancy step easier — we already have edges ranked by cost
-      so finding the cheapest extra road is a simple list scan
-
-fixes applied over original version:
-    fix 1 — standalone test now uses real challenge1 layout instead of
-             a fake 11-node layout, so redundancy search has enough nodes
-    fix 2 — redundancy search now tries path-adjacent edges first before
-             non-path edges, making it much more likely to find a valid
-             second path quickly rather than failing silently
-    fix 3 — get_open_neighbors_with_cost() added to citygraph interface
-             (used by challenge 3 dijkstra) — challenge2 now explicitly
-             does not depend on that method so it stays self-contained
-
-this file only writes to city_graph. call build_road_network(city) from
-main.py after challenge 1 has placed all location types on the grid.
-"""
+#challenge2_mst.py  road network optimization (challenge 2)
 
 import networkx as nx
 from city_graph import CityGraph
 
-
-# -----------------------------------------------------------------------------
-# main entry point
-# -----------------------------------------------------------------------------
-
 def build_road_network(city):
-    """
-    build the minimum-cost road network on the shared city graph.
+    #build weighted graph for kruskal
+    cost_graph = _build_cost_graph(city) 
 
-    steps:
-        1. compute edge costs from location types set by challenge 1
-        2. run kruskal's mst for cheapest connected network
-        3. identify primary hospital and primary ambulance depot
-        4. ensure two edge-disjoint paths exist between them
-        5. write all results to the shared city graph
-        6. set city.mst_built = True
-
-    parameters
-    ----------
-    city : CityGraph — the shared graph populated by challenge 1
-
-    returns
-    -------
-    dict with keys:
-        mst_edges        : list of (u, v) tuples in the final network
-        total_cost       : float total construction cost
-        primary_hospital : (row, col) of the chosen primary hospital
-        primary_depot    : (row, col) of the chosen primary depot
-        redundant_edge   : (u, v) of the extra safety edge, or None
-    """
-
-    # step 1 — build weighted graph for kruskal
-    cost_graph = _build_cost_graph(city)
-
-    # step 2 — run kruskal's mst
+    #running kruskals on it will find the cheapest node among all 100 nodes wihotu any loops
     mst = nx.minimum_spanning_tree(cost_graph, algorithm="kruskal", weight="weight")
 
-    # step 3 — identify primary hospital and depot
-    # note: if challenge 1 already set these, we respect them.
-    # if not (e.g. standalone test), we compute them here.
-    if city.primary_hospital is None or city.primary_depot is None:
+    #identify primary hospital and depot
+    #if challenge 1 already set these, we respect them
+    #if not (e.g. standalone test), we compute them here
+    if city.primary_hospital is None or city.primary_depot is None: #finding primary based on the population density and proximity
         primary_hospital, primary_depot = _identify_primary_nodes(city, mst)
         city.primary_hospital = primary_hospital
         city.primary_depot    = primary_depot
@@ -88,7 +24,7 @@ def build_road_network(city):
     city._log("SYSTEM", "primary hospital: {}".format(city.get_label(primary_hospital)))
     city._log("SYSTEM", "primary depot:    {}".format(city.get_label(primary_depot)))
 
-    # step 4 — ensure two independent paths between hospital and depot
+    #ensure two independent paths between hospital and depot
     connectivity   = nx.edge_connectivity(mst, primary_hospital, primary_depot)
     redundant_edge = None
 
@@ -98,7 +34,7 @@ def build_road_network(city):
             city, mst, cost_graph, primary_hospital, primary_depot
         )
         if redundant_edge is None:
-            # last resort: force-add the direct grid neighbor edge if it exists
+            #force-add the direct grid neighbor edge if it exists
             redundant_edge = _force_redundancy_fallback(
                 city, mst, cost_graph, primary_hospital, primary_depot
             )
@@ -107,7 +43,7 @@ def build_road_network(city):
             connectivity
         ))
 
-    # step 5 — write mst edges and costs to shared city graph
+    #write mst edges and costs to shared city graph
     total_cost = 0.0
     mst_edges  = []
 
@@ -117,13 +53,14 @@ def build_road_network(city):
         total_cost += edge_cost
         mst_edges.append((u, v))
 
-    # step 6 — mark mst as built
+    #mark mst as built
     city.mst_built = True
 
     city._log("SYSTEM", "road network complete | {} roads | total cost {:.2f}".format(
         len(mst_edges), total_cost
     ))
-    # block all non-mst edges — only mst roads are actual roads
+    
+    #block all non-mst edges — only mst roads are actual roads
     mst_edge_set = set()
     for u, v in mst_edges:
         mst_edge_set.add((min(u, v), max(u, v)))
@@ -149,17 +86,13 @@ def build_road_network(city):
     }
 
 
-# -----------------------------------------------------------------------------
-# step 1 helper: build the weighted graph kruskal runs on
-# -----------------------------------------------------------------------------
+#build the weighted graph kruskal runs on
 
 def _build_cost_graph(city):
     """
     create a networkx graph with all possible roads and their correct costs.
-
     cost rules from the project specification:
-        road touching a residential zone = 0.8
-        all other roads                  = 1.0
+        road touching a residential zone = 0.8 all other roads  = 1.0
     """
     cost_graph = nx.Graph()
 
@@ -180,14 +113,13 @@ def _build_cost_graph(city):
     return cost_graph
 
 
-# -----------------------------------------------------------------------------
-# step 3 helper: identify primary hospital and primary depot
-# -----------------------------------------------------------------------------
+#identify primary hospital and primary depot
+
 
 def _identify_primary_nodes(city, mst):
     """
-    primary hospital — hospital with highest total nearby population (2 hops in mst).
-    primary depot    — depot closest by path distance to the primary hospital.
+    primary hospital — hospital with highest total nearby population (2 hops in mst)
+    primary depot    — depot closest by path distance to the primary hospital
     """
     hospitals = city.nodes_of_type("Hospital")
     depots    = city.nodes_of_type("AmbulanceDepot")
@@ -225,7 +157,7 @@ def _identify_primary_nodes(city, mst):
 
 
 def _population_within_hops(city, mst, start_cell, max_hops):
-    """sum population density of all nodes within max_hops in the mst."""
+    """sum population density of all nodes within max_hops in the mst"""
     from collections import deque
     visited          = {start_cell}
     queue            = deque([(start_cell, 0)])
@@ -244,33 +176,28 @@ def _population_within_hops(city, mst, start_cell, max_hops):
     return total_population
 
 
-# -----------------------------------------------------------------------------
-# step 4 helper: add cheapest redundancy edge
-# -----------------------------------------------------------------------------
-
+#add cheapest redundancy edge
 def _add_redundancy_edge(city, mst, cost_graph, hospital, depot):
     """
-    find and add the cheapest non-mst edge that creates a second
-    edge-disjoint path between hospital and depot.
-
+    find and add the cheapest non-mst edge that creates a second edge-disjoint path between hospital and depot
     why this works:
-        the mst is a tree — exactly one path between any two nodes.
-        adding any edge creates exactly one new cycle.
+        the mst is a tree — exactly one path between any two nodes
+        adding any edge creates exactly one new cycle
         if that cycle passes through both hospital and depot,
         a second independent path now exists between them.
 
-    fix applied: tries edges whose endpoints are on the existing
+    tries edges whose endpoints are on the existing
     hospital-depot path first — these are most likely to form a
     useful cycle. only falls back to non-path edges if needed.
     """
-    # build set of mst edges for fast lookup
+    #build set of mst edges for fast lookup
     mst_edge_set = set()
     for u, v in mst.edges():
         mst_edge_set.add((min(u, v), max(u, v)))
 
     # get the current unique path from hospital to depot
     try:
-        current_path = nx.shortest_path(mst, hospital, depot)
+        current_path = nx.shortest_path(mst, hospital, depot)#it will store the very firts shoerteset path from hospitaal to depot and store it 
         path_nodes   = set(current_path)
     except nx.NetworkXNoPath:
         city._log("SYSTEM", "warning: hospital and depot not connected in mst")
@@ -281,13 +208,13 @@ def _add_redundancy_edge(city, mst, cost_graph, hospital, depot):
     for u, v, data in cost_graph.edges(data=True):
         edge_key = (min(u, v), max(u, v))
         if edge_key not in mst_edge_set:
-            candidate_edges.append((data["weight"], u, v))
+            candidate_edges.append((data["weight"], u, v)) # we will store them for the backup ruote 
 
     candidate_edges.sort(key=lambda x: x[0])
 
     # try path-adjacent edges first (both endpoints on the path),
-    # then single-endpoint edges, then all others.
-    # this prioritises edges that are most likely to form a useful cycle.
+    # then single-endpoint edges, then all others
+    # this prioritises edges that are most likely to form a useful cycle
     both_on_path  = [(w, u, v) for w, u, v in candidate_edges
                      if u in path_nodes and v in path_nodes]
     one_on_path   = [(w, u, v) for w, u, v in candidate_edges
@@ -314,13 +241,13 @@ def _add_redundancy_edge(city, mst, cost_graph, hospital, depot):
 
 def _force_redundancy_fallback(city, mst, cost_graph, hospital, depot):
     """
-    Challenge 2 Fix: If normal redundancy search fails to find a cycle-creating
+    Challenge 2: If normal redundancy search fails to find a cycle-creating
     non-MST edge (which happens if all potential edges are already in the MST),
-    we must strictly guarantee redundancy.
+    we must strictly guarantee redundancy
     
-    This function finds any neighbor of the hospital and any neighbor of the
+    this function finds any neighbor of the hospital and any neighbor of the
     depot in the original 10x10 grid (ignoring blocked edges) and adds a direct
-    path between them to force a cycle.
+    path between them to force a cycle
     """
     # Force a direct loop connection between a neighbor of hospital and neighbor of depot
     # Using the full grid coordinates (not just current graph edges) to guarantee we find one
@@ -342,9 +269,9 @@ def _force_redundancy_fallback(city, mst, cost_graph, hospital, depot):
     hospital_neighbors = get_grid_neighbors(hx, hy)
     depot_neighbors = get_grid_neighbors(dx, dy)
     
-    for h_nb in hospital_neighbors + [hospital]:
+    for h_nb in hospital_neighbors + [hospital]:#check neighbor of hospital to every meighbor of the depot
         for d_nb in depot_neighbors + [depot]:
-            if h_nb != d_nb and not mst.has_edge(h_nb, d_nb):
+            if h_nb != d_nb and not mst.has_edge(h_nb, d_nb): #if un dono ka neighbor same nhi and edge b exist krta to make a ruote
                 # Force add the edge
                 mst.add_edge(h_nb, d_nb, weight=1.0)
                 if nx.edge_connectivity(mst, hospital, depot) >= 2:
