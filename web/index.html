@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CityMind 3D — Urban Intelligence System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <!-- Control Panel -->
+    <div id="control-panel">
+        <h2>CityMind 3D</h2>
+        <div class="panel-section">
+            <h3>Simulation</h3>
+            <div class="btn-row">
+                <button id="btn-play" class="btn btn-primary">Play</button>
+                <button id="btn-pause" class="btn">Pause</button>
+                <button id="btn-reset" class="btn btn-danger">Reset</button>
+            </div>
+            <div class="step-display">Step: <span id="step-num">0</span> / 20</div>
+        </div>
+        <div class="panel-section">
+            <h3>Camera Views</h3>
+            <div class="btn-row">
+                <button class="btn btn-view" data-view="aerial">Aerial (1)</button>
+                <button class="btn btn-view" data-view="perspective">Perspective (2)</button>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-view" data-view="streetNorth">Street N (3)</button>
+                <button class="btn btn-view" data-view="streetSouth">Street S (4)</button>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-view" data-view="streetEast">Street E (5)</button>
+                <button class="btn btn-view" data-view="streetWest">Street W (6)</button>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-view" data-view="closeup">Close-up (7)</button>
+            </div>
+        </div>
+        <div class="panel-section">
+            <h3>Overlays</h3>
+            <label class="toggle">
+                <input type="checkbox" id="toggle-paths" checked> Path Lines
+            </label>
+            <label class="toggle">
+                <input type="checkbox" id="toggle-floods" checked> Flood Effects
+            </label>
+            <label class="toggle">
+                <input type="checkbox" id="toggle-risk"> Risk Heatmap
+            </label>
+            <label class="toggle">
+                <input type="checkbox" id="toggle-vehicles" checked> Ambulances
+            </label>
+        </div>
+        <div class="panel-section">
+            <h3>Stats</h3>
+            <div class="stat-row"><span>Ambulances:</span><span id="stat-amb">3</span></div>
+            <div class="stat-row"><span>Civilians Rescued:</span><span id="stat-rescued">0</span></div>
+            <div class="stat-row"><span>Flooded Roads:</span><span id="stat-floods">0</span></div>
+            <div class="stat-row"><span>Risk Level:</span><span id="stat-risk">Low</span></div>
+        </div>
+        <div class="panel-section">
+            <h3>Legend</h3>
+            <div class="legend-item"><span class="legend-color" style="background:#64d282"></span> Residential</div>
+            <div class="legend-item"><span class="legend-color" style="background:#ff7882"></span> Hospital</div>
+            <div class="legend-item"><span class="legend-color" style="background:#ffcd50"></span> School</div>
+            <div class="legend-item"><span class="legend-color" style="background:#b4bec8"></span> Industrial</div>
+            <div class="legend-item"><span class="legend-color" style="background:#c88cff"></span> Power Plant</div>
+            <div class="legend-item"><span class="legend-color" style="background:#5ab4ff"></span> Ambulance Depot</div>
+            <div class="legend-item"><span class="legend-color" style="background:#a0dca0"></span> Park/Empty</div>
+        </div>
+    </div>
+
+    <!-- Event Log -->
+    <div id="event-log">
+        <div class="log-header">Event Log</div>
+        <div id="log-entries"></div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container"></div>
+
+    <div id="loading-screen">
+        <div class="loader-content">
+            <h1>CityMind 3D</h1>
+            <p>Loading city simulation...</p>
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
