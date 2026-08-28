@@ -1,6 +1,5 @@
 // vehicles.js — 3D ambulance models with smooth path animation
 import * as THREE from 'three';
-import { ambulancePositions } from './cityData.js';
 
 const TILE_SIZE = 4;
 

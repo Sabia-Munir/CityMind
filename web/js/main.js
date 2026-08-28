@@ -142,11 +142,8 @@ ui.on('toggleVehicles', (on) => { vehicles.group.visible = on; });
 ui.on('toggleRisk', (on) => { heatmap.group.visible = on; });
 
 // ─── remove loading screen ───────────────────────────────────────────────
-window.addEventListener('load', () => {
-    setTimeout(() => {
-        document.getElementById('loading-screen').classList.add('hidden');
-    }, 800);
-});
+const loadingEl = document.getElementById('loading-screen');
+if (loadingEl) loadingEl.classList.add('hidden');
 
 // ─── animation loop ──────────────────────────────────────────────────────
 const clock = new THREE.Clock();
