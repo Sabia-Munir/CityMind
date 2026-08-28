@@ -1,13 +1,15 @@
 // vehicles.js — 3D ambulance models with smooth path animation
 import * as THREE from 'three';
+import { ambulancePositions } from './cityData.js';
 
 const TILE_SIZE = 4;
 
-// Ambulances should be placed on road-adjacent positions, not inside buildings
+// Ambulances placed at road midpoints (between cells), not inside buildings
+// Road from (0,4)→(0,5), (5,3)→(5,4), (9,6)→(9,7)
 const AMBULANCE_ROAD_POSITIONS = [
-    [0, 4],   // near hospital
-    [5, 4],   // near depot
-    [9, 7],   // south road
+    { row: 0, col: 0.5 },   // on road between (0,4) and (0,5)
+    { row: 5, col: 3.5 },   // on road between (5,3) and (5,4)
+    { row: 9, col: 6.5 },   // on road between (9,6) and (9,7)
 ];
 
 export class VehicleSystem {
@@ -26,12 +28,12 @@ export class VehicleSystem {
     _createAmbulances() {
         AMBULANCE_ROAD_POSITIONS.forEach((pos, index) => {
             const ambulance = this._buildAmbulance(index);
-            const worldPos = this.terrain.gridToWorld(pos[0], pos[1]);
+            const worldPos = this.terrain.gridToWorld(pos.row, pos.col);
             ambulance.position.set(worldPos.x, 0.15, worldPos.z);
             this.group.add(ambulance);
             this.ambulances.push({
                 mesh: ambulance,
-                gridPos: [...pos],
+                gridPos: [pos.row, pos.col],
                 worldPos: worldPos.clone(),
                 targetWorldPos: worldPos.clone(),
                 path: [],

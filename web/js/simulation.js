@@ -1,5 +1,5 @@
 // simulation.js — step-by-step simulation controller
-import { GRID_ROWS, GRID_COLS, zoneGrid, roadEdges, primaryHospital, primaryDepot } from './cityData.js';
+import { GRID_ROWS, GRID_COLS, zoneGrid, roadEdges, ambulancePositions, primaryHospital, primaryDepot } from './cityData.js';
 
 export class SimulationController {
     constructor(vehicles, pathViz, floods, heatmap, ui) {
