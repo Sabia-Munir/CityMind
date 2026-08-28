@@ -11,7 +11,6 @@ export class FloodSystem {
         this.group.name = 'floods';
         this.scene.add(this.group);
         this.floodPlanes = [];
-        this.rippleTime = 0;
     }
 
     addFlood(row1, col1, row2, col2, floodId) {
@@ -22,75 +21,78 @@ export class FloodSystem {
         const midZ = (wp1.z + wp2.z) / 2;
 
         const isHorizontal = Math.abs(row1 - row2) < 0.01;
-        const width = isHorizontal ? TILE_SIZE + 0.5 : TILE_SIZE * 0.8;
-        const depth = isHorizontal ? TILE_SIZE * 0.8 : TILE_SIZE + 0.5;
+        const w = isHorizontal ? TILE_SIZE + 1.0 : TILE_SIZE * 0.9;
+        const d = isHorizontal ? TILE_SIZE * 0.9 : TILE_SIZE + 1.0;
 
-        // water plane
-        const waterGeo = new THREE.PlaneGeometry(width, depth, 16, 16);
+        // main water surface — raised above road
+        const waterGeo = new THREE.BoxGeometry(w, 0.25, d);
         const waterMat = new THREE.MeshStandardMaterial({
-            color: 0x2080cc,
+            color: 0x2090dd,
             transparent: true,
-            opacity: 0.65,
-            roughness: 0.2,
-            metalness: 0.3,
-            side: THREE.DoubleSide,
+            opacity: 0.75,
+            roughness: 0.1,
+            metalness: 0.4,
         });
         const water = new THREE.Mesh(waterGeo, waterMat);
-        water.rotation.x = -Math.PI / 2;
-        water.position.set(midX, 0.15, midZ);
+        water.position.set(midX, 0.22, midZ);
         water.name = `flood_${floodId}`;
+        water.receiveShadow = true;
         this.group.add(water);
 
-        // floating debris
-        for (let i = 0; i < 3; i++) {
-            const debris = new THREE.Mesh(
-                new THREE.BoxGeometry(0.15, 0.05, 0.15),
-                new THREE.MeshStandardMaterial({ color: 0x8b6914 })
-            );
-            debris.position.set(
-                midX + (Math.random() - 0.5) * width * 0.6,
-                0.18,
-                midZ + (Math.random() - 0.5) * depth * 0.6
-            );
-            debris.rotation.y = Math.random() * Math.PI;
-            debris.name = `debris_${floodId}_${i}`;
-            this.group.add(debris);
-        }
+        // surface highlight (top shimmer)
+        const shimmerGeo = new THREE.PlaneGeometry(w * 0.8, d * 0.8);
+        const shimmerMat = new THREE.MeshBasicMaterial({
+            color: 0x88ccff,
+            transparent: true,
+            opacity: 0.35,
+            side: THREE.DoubleSide,
+        });
+        const shimmer = new THREE.Mesh(shimmerGeo, shimmerMat);
+        shimmer.rotation.x = -Math.PI / 2;
+        shimmer.position.set(midX, 0.36, midZ);
+        shimmer.name = `shimmer_${floodId}`;
+        this.group.add(shimmer);
 
-        // warning sign (floating triangle)
-        const signGroup = new THREE.Group();
-        const signGeo = new THREE.BufferGeometry();
-        const verts = new Float32Array([
-            0, 0.3, 0,   -0.15, 0, 0,   0.15, 0, 0
-        ]);
-        signGeo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-        signGeo.computeVertexNormals();
-        const signMat = new THREE.MeshStandardMaterial({
+        // warning sign post
+        const post = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.04, 0.04, 0.8, 6),
+            new THREE.MeshStandardMaterial({ color: 0x888888 })
+        );
+        post.position.set(midX + w * 0.35, 0.65, midZ);
+        post.name = `post_${floodId}`;
+        this.group.add(post);
+
+        // warning triangle
+        const triShape = new THREE.Shape();
+        triShape.moveTo(0, 0.25);
+        triShape.lineTo(-0.15, 0);
+        triShape.lineTo(0.15, 0);
+        triShape.closePath();
+        const triGeo = new THREE.ShapeGeometry(triShape);
+        const triMat = new THREE.MeshStandardMaterial({
             color: 0xffcc00,
             emissive: 0xff8800,
-            emissiveIntensity: 0.3,
-            side: THREE.DoubleSide
+            emissiveIntensity: 0.4,
+            side: THREE.DoubleSide,
         });
-        const sign = new THREE.Mesh(signGeo, signMat);
-        sign.position.set(midX, 0.5, midZ);
-        sign.name = `sign_${floodId}`;
-        this.group.add(sign);
+        const tri = new THREE.Mesh(triGeo, triMat);
+        tri.position.set(midX + w * 0.35, 1.05, midZ);
+        tri.name = `warning_${floodId}`;
+        this.group.add(tri);
 
         this.floodPlanes.push({
             id: floodId,
             water,
-            debris: [],
-            sign,
+            shimmer,
             time: Math.random() * 10,
+            row1, col1, row2, col2,
         });
     }
 
     removeFlood(floodId) {
         const toRemove = [];
         this.group.children.forEach(child => {
-            if (child.name.startsWith(`flood_${floodId}`) ||
-                child.name.startsWith(`debris_${floodId}`) ||
-                child.name.startsWith(`sign_${floodId}`)) {
+            if (child.name.includes(floodId)) {
                 toRemove.push(child);
             }
         });
@@ -100,6 +102,14 @@ export class FloodSystem {
             if (obj.material) obj.material.dispose();
         });
         this.floodPlanes = this.floodPlanes.filter(f => f.id !== floodId);
+    }
+
+    removeFloodByEdge(r1, c1, r2, c2) {
+        const match = this.floodPlanes.find(f =>
+            (f.row1 === r1 && f.col1 === c1 && f.row2 === r2 && f.col2 === c2) ||
+            (f.row1 === r2 && f.col1 === c2 && f.row2 === r1 && f.col2 === c1)
+        );
+        if (match) this.removeFlood(match.id);
     }
 
     clearAll() {
@@ -113,36 +123,15 @@ export class FloodSystem {
     }
 
     update(delta) {
-        this.rippleTime += delta;
-
         this.floodPlanes.forEach(flood => {
             flood.time += delta;
 
-            // ripple the water vertices
-            const geo = flood.water.geometry;
-            const pos = geo.attributes.position;
-            for (let i = 0; i < pos.count; i++) {
-                const x = pos.getX(i);
-                const y = pos.getY(i);
-                const ripple = Math.sin(x * 2 + flood.time * 2) * 0.03 +
-                               Math.cos(y * 2.5 + flood.time * 1.5) * 0.02;
-                pos.setZ(i, ripple);
-            }
-            pos.needsUpdate = true;
-            geo.computeVertexNormals();
+            // bob the water
+            flood.water.position.y = 0.22 + Math.sin(flood.time * 1.5) * 0.03;
 
-            // bob the debris
-            this.group.children.forEach(child => {
-                if (child.name.startsWith(`debris_${flood.id}`)) {
-                    child.position.y = 0.17 + Math.sin(flood.time * 1.5 + child.position.x) * 0.03;
-                    child.rotation.y += delta * 0.3;
-                }
-            });
-
-            // bob the warning sign
-            if (flood.sign) {
-                flood.sign.position.y = 0.45 + Math.sin(flood.time * 2) * 0.05;
-                flood.sign.rotation.y += delta * 0.5;
+            // shimmer pulse
+            if (flood.shimmer) {
+                flood.shimmer.material.opacity = 0.25 + Math.sin(flood.time * 2) * 0.15;
             }
         });
     }

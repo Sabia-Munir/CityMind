@@ -9,6 +9,7 @@ import { PathVisualizer } from './path.js';
 import { FloodSystem } from './flood.js';
 import { UIController } from './ui.js';
 import { HeatmapSystem } from './heatmap.js';
+import { SimulationController } from './simulation.js';
 
 // ─── constants ───────────────────────────────────────────────────────────
 const GRID_SIZE = 10;
@@ -130,27 +131,15 @@ const ui = new UIController();
 // ─── risk heatmap ────────────────────────────────────────────────────────
 const heatmap = new HeatmapSystem(scene, terrain);
 
+// ─── simulation controller ───────────────────────────────────────────────
+const sim = new SimulationController(vehicles, pathViz, floods, heatmap, ui);
+
 // bind UI events
 ui.on('camera', (view) => cameraCtrl.switchTo(view));
 ui.on('togglePaths', (on) => { pathViz.group.visible = on; });
 ui.on('toggleFloods', (on) => { floods.group.visible = on; });
 ui.on('toggleVehicles', (on) => { vehicles.group.visible = on; });
 ui.on('toggleRisk', (on) => { heatmap.group.visible = on; });
-
-// demo: add some floods
-setTimeout(() => {
-    floods.addFlood(3, 5, 4, 5, 'flood1');
-    floods.addFlood(7, 2, 7, 3, 'flood2');
-}, 3000);
-
-// demo: show paths for the ambulances
-setTimeout(() => {
-    vehicles.setPath(0, [[1,4],[1,5],[2,5],[3,5],[4,5]]);
-    pathViz.showPath([[1,4],[1,5],[2,5],[3,5],[4,5]], 0x3cff8c, 'amb0');
-
-    vehicles.setPath(1, [[6,4],[5,4],[4,4],[3,4],[2,4]]);
-    pathViz.showPath([[6,4],[5,4],[4,4],[3,4],[2,4]], 0xff6b3c, 'amb1');
-}, 2000);
 
 // ─── remove loading screen ───────────────────────────────────────────────
 window.addEventListener('load', () => {
@@ -169,7 +158,8 @@ function animate() {
     cameraCtrl.update(delta);
     controls.update();
     lighting.update(delta);
-    vehicles.update(delta, elapsed);
+    sim.update(delta);
+    vehicles.update(delta);
     pathViz.update(elapsed);
     floods.update(delta);
     heatmap.update(elapsed);
@@ -184,4 +174,4 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-console.log('CityMind 3D initialized');
+console.log('CityMind 3D initialized — click Play to start');
