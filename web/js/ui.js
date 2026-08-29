@@ -115,6 +115,10 @@ export class UIController {
         toast.className = `toast toast-${type}`;
         toast.textContent = message;
         this.toastContainer.appendChild(toast);
-        setTimeout(() => toast.remove(), 3500);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-10px)';
+            setTimeout(() => toast.remove(), 400);
+        }, 3000);
     }
 }
