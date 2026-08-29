@@ -10,6 +10,7 @@ import { FloodSystem } from './flood.js';
 import { UIController } from './ui.js';
 import { HeatmapSystem } from './heatmap.js';
 import { SimulationController } from './simulation.js';
+import { CivilianSystem } from './civilians.js';
 
 // ─── constants ───────────────────────────────────────────────────────────
 const GRID_SIZE = 10;
@@ -134,6 +135,10 @@ const heatmap = new HeatmapSystem(scene, terrain);
 // ─── simulation controller ───────────────────────────────────────────────
 const sim = new SimulationController(vehicles, pathViz, floods, heatmap, ui);
 
+// ─── civilian markers ────────────────────────────────────────────────────
+const civilians = new CivilianSystem(scene, terrain);
+civilians.showCivilians(sim.civilians);
+
 // bind UI events
 ui.on('camera', (view) => cameraCtrl.switchTo(view));
 ui.on('togglePaths', (on) => { pathViz.group.visible = on; });
@@ -161,6 +166,7 @@ function animate() {
     pathViz.update(elapsed);
     floods.update(delta);
     heatmap.update(elapsed);
+    civilians.update(elapsed);
     renderer.render(scene, camera);
 }
 animate();
