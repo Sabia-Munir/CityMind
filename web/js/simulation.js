@@ -2,8 +2,8 @@
 import { GRID_ROWS, GRID_COLS, zoneGrid, roadEdges, primaryHospital, primaryDepot } from './cityData.js';
 
 const AMB_COLORS = [0x3cff8c, 0xff6b3c, 0x44aaff];
-const AMB_STARTS = [[1,5], [5,4], [8,8]];
-const AMB_DEPOTS = [[1,4], [6,4], [9,8]];
+const AMB_STARTS = [[3,5], [6,4], [9,7]];
+const AMB_DEPOTS = [[3,5], [6,4], [9,7]];
 const AMB_NAMES = ['Alpha', 'Bravo', 'Charlie'];
 
 export class SimulationController {
@@ -214,6 +214,9 @@ export class SimulationController {
     _routeAmbulance(slot) {
         const task = this.ambTasks[slot];
         if (task.done) return;
+
+        const amb = this.vehicles.ambulances[slot];
+        if (amb.moving) return;
 
         const civList = this.ambCivLists[slot];
 

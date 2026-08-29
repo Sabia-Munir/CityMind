@@ -3,9 +3,9 @@ import * as THREE from 'three';
 const TILE_SIZE = 4;
 
 const START_POSITIONS = [
-    [1, 5],
-    [5, 4],
-    [8, 8],
+    [3, 5],
+    [6, 4],
+    [9, 7],
 ];
 const AMB_NAMES = ['ALPHA', 'BRAVO', 'CHARLIE'];
 const AMB_COLORS_HEX = [0x3cff8c, 0xff6b3c, 0x44aaff];
@@ -18,7 +18,7 @@ export class VehicleSystem {
         this.group.name = 'vehicles';
         this.scene.add(this.group);
         this.ambulances = [];
-        this.speed = 6.0;
+        this.speed = 15.0;
         this._createAll();
     }
 
