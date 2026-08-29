@@ -1,4 +1,4 @@
-// vehicles.js — 3 ambulances, large and visible above buildings
+// vehicles.js — 3 ambulances on road surfaces, smooth movement
 import * as THREE from 'three';
 const TILE_SIZE = 4;
 
@@ -24,34 +24,23 @@ export class VehicleSystem {
 
     _createAll() {
         START_POSITIONS.forEach((pos, i) => {
-            const wrapper = new THREE.Group();
+            const mesh = this._buildAmbulance();
             const wp = this.terrain.gridToWorld(pos[0], pos[1]);
-            const yBase = 2.2;
+            mesh.position.set(wp.x, 0.2, wp.z);
+            this.group.add(mesh);
+
+            const nameSprite = this._makeNameSprite(AMB_NAMES[i], AMB_COLORS_HEX[i]);
+            nameSprite.position.set(wp.x, 1.8, wp.z);
+            this.group.add(nameSprite);
 
             const groundRing = this._makeGroundRing(AMB_COLORS_HEX[i]);
-            wrapper.add(groundRing);
-
-            const ambulanceModel = this._buildAmbulance();
-            ambulanceModel.position.y = 0;
-            wrapper.add(ambulanceModel);
-
-            const label = this._makeLabel(AMB_NAMES[i], AMB_COLORS_HEX[i]);
-            label.position.y = 2.2;
-            wrapper.add(label);
-
-            const nameSprite = this._makeSprite(AMB_NAMES[i], AMB_COLORS_HEX[i]);
-            nameSprite.position.y = 2.8;
-            wrapper.add(nameSprite);
-
-            wrapper.position.set(wp.x, yBase, wp.z);
-            wrapper.scale.set(1.8, 1.8, 1.8);
-            this.group.add(wrapper);
+            groundRing.position.set(wp.x, 0.05, wp.z);
+            this.group.add(groundRing);
 
             this.ambulances.push({
-                mesh: wrapper,
-                groundRing,
-                label,
+                mesh,
                 nameSprite,
+                groundRing,
                 gridPos: [...pos],
                 worldPos: wp.clone(),
                 targetWorldPos: wp.clone(),
@@ -63,81 +52,42 @@ export class VehicleSystem {
         });
     }
 
+    _makeNameSprite(text, color) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 80;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.beginPath();
+        ctx.roundRect(4, 4, 248, 72, 10);
+        ctx.fill();
+        ctx.font = 'bold 40px monospace';
+        ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 128, 40);
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(2.5, 0.8, 1);
+        return sprite;
+    }
+
     _makeGroundRing(color) {
         const g = new THREE.Group();
         const ring = new THREE.Mesh(
-            new THREE.RingGeometry(0.8, 1.0, 32),
-            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
+            new THREE.RingGeometry(1.0, 1.2, 32),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
         );
         ring.rotation.x = -Math.PI / 2;
-        ring.position.y = -2.1;
         g.add(ring);
-
         const disc = new THREE.Mesh(
-            new THREE.CircleGeometry(0.6, 16),
-            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
+            new THREE.CircleGeometry(0.7, 16),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.2, side: THREE.DoubleSide })
         );
         disc.rotation.x = -Math.PI / 2;
-        disc.position.y = -2.15;
         g.add(disc);
-
-        const glow = new THREE.Mesh(
-            new THREE.RingGeometry(1.0, 1.3, 32),
-            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, side: THREE.DoubleSide })
-        );
-        glow.rotation.x = -Math.PI / 2;
-        glow.position.y = -2.05;
-        glow.name = 'groundGlow';
-        g.add(glow);
-
         return g;
-    }
-
-    _makeSprite(text, color) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.roundRect(0, 0, 256, 64, 8);
-        ctx.fill();
-        ctx.font = 'bold 36px monospace';
-        ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, 128, 32);
-
-        const tex = new THREE.CanvasTexture(canvas);
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-        const sprite = new THREE.Sprite(mat);
-        sprite.scale.set(2.5, 0.6, 1);
-        return sprite;
-    }
-
-    _makeLabel(text, color) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 128;
-        const ctx = canvas.getContext('2d');
-        ctx.beginPath();
-        ctx.arc(64, 64, 56, 0, Math.PI * 2);
-        ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 4;
-        ctx.stroke();
-        ctx.font = 'bold 28px monospace';
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const idx = AMB_NAMES.indexOf(text);
-        ctx.fillText('+' + (idx + 1), 64, 64);
-
-        const tex = new THREE.CanvasTexture(canvas);
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-        const sprite = new THREE.Sprite(mat);
-        sprite.scale.set(0.8, 0.8, 1);
-        return sprite;
     }
 
     _buildAmbulance() {
@@ -215,7 +165,9 @@ export class VehicleSystem {
         if (idx >= this.ambulances.length) return;
         const amb = this.ambulances[idx];
         const wp = this.terrain.gridToWorld(row, col);
-        amb.mesh.position.set(wp.x, 2.2, wp.z);
+        amb.mesh.position.set(wp.x, 0.2, wp.z);
+        amb.nameSprite.position.set(wp.x, 1.8, wp.z);
+        amb.groundRing.position.set(wp.x, 0.05, wp.z);
         amb.gridPos = [row, col];
         amb.worldPos.copy(wp);
         amb.targetWorldPos.copy(wp);
@@ -238,11 +190,6 @@ export class VehicleSystem {
                 pt.color.setHex(flash ? 0xff0000 : 0x0066ff);
             }
 
-            const glow = amb.groundRing.getObjectByName('groundGlow');
-            if (glow) {
-                glow.material.opacity = flash ? 0.4 : 0.15;
-            }
-
             if (!amb.moving || amb.path.length === 0) return;
             const pos = amb.mesh.position;
             const tgt = amb.targetWorldPos;
@@ -259,9 +206,15 @@ export class VehicleSystem {
             } else {
                 const dir = new THREE.Vector3().subVectors(tgt, pos).normalize();
                 pos.addScaledVector(dir, Math.min(this.speed * delta, dist));
-                pos.y = 2.2;
+                pos.y = 0.2;
                 amb.mesh.rotation.y = Math.atan2(dir.x, dir.z);
-                amb.groundRing.rotation.y += delta * 2;
+
+                amb.nameSprite.position.x = pos.x;
+                amb.nameSprite.position.z = pos.z;
+                amb.nameSprite.position.y = 1.8;
+
+                amb.groundRing.position.x = pos.x;
+                amb.groundRing.position.z = pos.z;
             }
         });
     }
