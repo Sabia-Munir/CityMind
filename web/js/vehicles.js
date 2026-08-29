@@ -33,14 +33,14 @@ export class VehicleSystem {
             wrapper.add(ambulanceModel);
 
             const nameSprite = this._makeNameSprite(AMB_NAMES[i], AMB_COLORS_HEX[i]);
-            nameSprite.position.y = 2.0;
+            nameSprite.position.y = 1.6;
             wrapper.add(nameSprite);
 
             const groundRing = this._makeGroundRing(AMB_COLORS_HEX[i]);
-            groundRing.position.y = -0.44;
+            groundRing.position.y = -0.48;
             wrapper.add(groundRing);
 
-            wrapper.position.set(wp.x, 0.5, wp.z);
+            wrapper.position.set(wp.x, 0, wp.z);
             this.group.add(wrapper);
 
             this.ambulances.push({
@@ -185,7 +185,7 @@ export class VehicleSystem {
         if (idx >= this.ambulances.length) return;
         const amb = this.ambulances[idx];
         const wp = this.terrain.gridToWorld(row, col);
-        amb.mesh.position.set(wp.x, 0.5, wp.z);
+        amb.mesh.position.set(wp.x, 0, wp.z);
         amb.gridPos = [row, col];
         amb.worldPos.copy(wp);
         amb.targetWorldPos.copy(wp);
@@ -224,7 +224,7 @@ export class VehicleSystem {
             } else {
                 const dir = new THREE.Vector3().subVectors(tgt, pos).normalize();
                 pos.addScaledVector(dir, Math.min(this.speed * delta, dist));
-                pos.y = 0.5;
+                pos.y = 0;
                 amb.mesh.rotation.y = Math.atan2(dir.x, dir.z);
             }
         });
