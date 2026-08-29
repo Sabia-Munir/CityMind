@@ -116,6 +116,39 @@ html, body {
     margin-top: 6px;
 }
 
+.speed-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 0.65rem;
+    color: #a0b8d0;
+}
+
+.speed-control input[type="range"] {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    background: rgba(79, 195, 247, 0.3);
+    border-radius: 2px;
+    outline: none;
+}
+
+.speed-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #4fc3f7;
+    cursor: pointer;
+}
+
+#speed-label {
+    color: #4fc3f7;
+    font-weight: 600;
+    min-width: 24px;
+}
+
 /* ─── Toggles ───────────────────────────────────────────────────────────── */
 .toggle {
     display: flex;

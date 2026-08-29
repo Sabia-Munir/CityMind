@@ -140,6 +140,7 @@ ui.on('togglePaths', (on) => { pathViz.group.visible = on; });
 ui.on('toggleFloods', (on) => { floods.group.visible = on; });
 ui.on('toggleVehicles', (on) => { vehicles.group.visible = on; });
 ui.on('toggleRisk', (on) => { heatmap.group.visible = on; });
+ui.on('speed', (val) => { sim.stepInterval = val; });
 
 // ─── remove loading screen ───────────────────────────────────────────────
 const loadingScreen = document.getElementById('loading-screen');

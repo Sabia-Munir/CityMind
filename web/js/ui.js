@@ -45,6 +45,17 @@ export class UIController {
         document.getElementById('toggle-vehicles')?.addEventListener('change', (e) => {
             this._fire('toggleVehicles', e.target.checked);
         });
+
+        // speed slider
+        const slider = document.getElementById('speed-slider');
+        const label = document.getElementById('speed-label');
+        if (slider) {
+            slider.addEventListener('input', (e) => {
+                const val = parseInt(e.target.value);
+                if (label) label.textContent = val + 's';
+                this._fire('speed', val);
+            });
+        }
     }
 
     _bindKeyboard() {
