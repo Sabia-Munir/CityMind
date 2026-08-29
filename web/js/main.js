@@ -138,6 +138,7 @@ const sim = new SimulationController(vehicles, pathViz, floods, heatmap, ui);
 // ─── civilian markers ────────────────────────────────────────────────────
 const civilians = new CivilianSystem(scene, terrain);
 civilians.showCivilians(sim.civilians);
+sim.onCiviliansChanged = (civs) => civilians.showCivilians(civs);
 
 // bind UI events
 ui.on('camera', (view) => cameraCtrl.switchTo(view));

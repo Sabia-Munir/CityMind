@@ -18,7 +18,7 @@ export class VehicleSystem {
         this.group.name = 'vehicles';
         this.scene.add(this.group);
         this.ambulances = [];
-        this.speed = 4.0;
+        this.speed = 12.0;
         this._createAll();
     }
 
