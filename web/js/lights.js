@@ -5,8 +5,8 @@ export class CityLighting {
     constructor(scene) {
         this.scene = scene;
         this.lights = {};
-        this.timeOfDay = 0.35; // 0=midnight, 0.25=sunrise, 0.5=noon, 0.75=sunset
-        this.daySpeed = 0.008;  // speed of day/night cycle
+        this.timeOfDay = 0.4; // locked to daytime — no night cycle
+        this.daySpeed = 0;    // disabled
         this.buildingLights = [];
         this._createLights();
     }
