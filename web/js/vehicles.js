@@ -18,7 +18,7 @@ export class VehicleSystem {
         this.group.name = 'vehicles';
         this.scene.add(this.group);
         this.ambulances = [];
-        this.speed = 12.0;
+        this.speed = 6.0;
         this._createAll();
     }
 
@@ -26,11 +26,11 @@ export class VehicleSystem {
         START_POSITIONS.forEach((pos, i) => {
             const mesh = this._buildAmbulance();
             const wp = this.terrain.gridToWorld(pos[0], pos[1]);
-            mesh.position.set(wp.x, 0.2, wp.z);
+            mesh.position.set(wp.x, 0.5, wp.z);
             this.group.add(mesh);
 
             const nameSprite = this._makeNameSprite(AMB_NAMES[i], AMB_COLORS_HEX[i]);
-            nameSprite.position.set(wp.x, 1.8, wp.z);
+            nameSprite.position.set(wp.x, 2.2, wp.z);
             this.group.add(nameSprite);
 
             const groundRing = this._makeGroundRing(AMB_COLORS_HEX[i]);
@@ -165,8 +165,8 @@ export class VehicleSystem {
         if (idx >= this.ambulances.length) return;
         const amb = this.ambulances[idx];
         const wp = this.terrain.gridToWorld(row, col);
-        amb.mesh.position.set(wp.x, 0.2, wp.z);
-        amb.nameSprite.position.set(wp.x, 1.8, wp.z);
+        amb.mesh.position.set(wp.x, 0.5, wp.z);
+        amb.nameSprite.position.set(wp.x, 2.2, wp.z);
         amb.groundRing.position.set(wp.x, 0.05, wp.z);
         amb.gridPos = [row, col];
         amb.worldPos.copy(wp);
@@ -206,12 +206,12 @@ export class VehicleSystem {
             } else {
                 const dir = new THREE.Vector3().subVectors(tgt, pos).normalize();
                 pos.addScaledVector(dir, Math.min(this.speed * delta, dist));
-                pos.y = 0.2;
+                pos.y = 0.5;
                 amb.mesh.rotation.y = Math.atan2(dir.x, dir.z);
 
                 amb.nameSprite.position.x = pos.x;
                 amb.nameSprite.position.z = pos.z;
-                amb.nameSprite.position.y = 1.8;
+                amb.nameSprite.position.y = 2.2;
 
                 amb.groundRing.position.x = pos.x;
                 amb.groundRing.position.z = pos.z;
