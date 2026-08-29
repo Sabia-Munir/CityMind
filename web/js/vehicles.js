@@ -1,14 +1,14 @@
-// vehicles.js — 3 ambulances on road surfaces, smooth movement
+// vehicles.js — 3 ambulances, large and visible above buildings
 import * as THREE from 'three';
 const TILE_SIZE = 4;
 
-// Each ambulance starts on a road segment near its depot
-// gridToWorld converts integer (row,col) to world center of that tile
 const START_POSITIONS = [
-    [1, 5],  // amb0 on road next to hospital [1,4]
-    [5, 4],  // amb1 on road near depot [6,4] 
-    [8, 8],  // amb2 on road near depot [9,8]
+    [1, 5],
+    [5, 4],
+    [8, 8],
 ];
+const AMB_NAMES = ['ALPHA', 'BRAVO', 'CHARLIE'];
+const AMB_COLORS_HEX = [0x3cff8c, 0xff6b3c, 0x44aaff];
 
 export class VehicleSystem {
     constructor(scene, terrain) {
@@ -24,67 +24,169 @@ export class VehicleSystem {
 
     _createAll() {
         START_POSITIONS.forEach((pos, i) => {
-            const mesh = this._buildAmbulance();
+            const wrapper = new THREE.Group();
             const wp = this.terrain.gridToWorld(pos[0], pos[1]);
-            mesh.position.set(wp.x, 0.2, wp.z);
-            this.group.add(mesh);
+            const yBase = 2.2;
+
+            const groundRing = this._makeGroundRing(AMB_COLORS_HEX[i]);
+            wrapper.add(groundRing);
+
+            const ambulanceModel = this._buildAmbulance();
+            ambulanceModel.position.y = 0;
+            wrapper.add(ambulanceModel);
+
+            const label = this._makeLabel(AMB_NAMES[i], AMB_COLORS_HEX[i]);
+            label.position.y = 2.2;
+            wrapper.add(label);
+
+            const nameSprite = this._makeSprite(AMB_NAMES[i], AMB_COLORS_HEX[i]);
+            nameSprite.position.y = 2.8;
+            wrapper.add(nameSprite);
+
+            wrapper.position.set(wp.x, yBase, wp.z);
+            wrapper.scale.set(1.8, 1.8, 1.8);
+            this.group.add(wrapper);
+
             this.ambulances.push({
-                mesh, gridPos: [...pos], worldPos: wp.clone(),
-                targetWorldPos: wp.clone(), path: [], pathIndex: 0,
-                moving: false, lightPhase: Math.random() * 6.28,
-                currentStep: -1,
+                mesh: wrapper,
+                groundRing,
+                label,
+                nameSprite,
+                gridPos: [...pos],
+                worldPos: wp.clone(),
+                targetWorldPos: wp.clone(),
+                path: [],
+                pathIndex: 0,
+                moving: false,
+                lightPhase: Math.random() * 6.28,
             });
         });
     }
 
+    _makeGroundRing(color) {
+        const g = new THREE.Group();
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.8, 1.0, 32),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = -2.1;
+        g.add(ring);
+
+        const disc = new THREE.Mesh(
+            new THREE.CircleGeometry(0.6, 16),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
+        );
+        disc.rotation.x = -Math.PI / 2;
+        disc.position.y = -2.15;
+        g.add(disc);
+
+        const glow = new THREE.Mesh(
+            new THREE.RingGeometry(1.0, 1.3, 32),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, side: THREE.DoubleSide })
+        );
+        glow.rotation.x = -Math.PI / 2;
+        glow.position.y = -2.05;
+        glow.name = 'groundGlow';
+        g.add(glow);
+
+        return g;
+    }
+
+    _makeSprite(text, color) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.roundRect(0, 0, 256, 64, 8);
+        ctx.fill();
+        ctx.font = 'bold 36px monospace';
+        ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 128, 32);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(2.5, 0.6, 1);
+        return sprite;
+    }
+
+    _makeLabel(text, color) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.beginPath();
+        ctx.arc(64, 64, 56, 0, Math.PI * 2);
+        ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        ctx.font = 'bold 28px monospace';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const idx = AMB_NAMES.indexOf(text);
+        ctx.fillText('+' + (idx + 1), 64, 64);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(0.8, 0.8, 1);
+        return sprite;
+    }
+
     _buildAmbulance() {
         const g = new THREE.Group();
-        const s = 1.6; // scale
+        const s = 1.6;
 
-        // body
-        g.add(this._box(0.9*s, 0.45*s, 1.6*s, 0xffffff, [0, 0.35*s, 0]));
-        // cabin
-        g.add(this._box(0.8*s, 0.35*s, 0.5*s, 0xeeeeee, [0, 0.52*s, -0.5*s]));
-        // windshield
-        const ws = this._box(0.7*s, 0.25*s, 0.05, 0x88ccff, [0, 0.58*s, -0.76*s]);
-        ws.material.transparent = true; ws.material.opacity = 0.7;
+        g.add(this._box(0.9 * s, 0.45 * s, 1.6 * s, 0xffffff, [0, 0.35 * s, 0]));
+        g.add(this._box(0.8 * s, 0.35 * s, 0.5 * s, 0xeeeeee, [0, 0.52 * s, -0.5 * s]));
+
+        const ws = this._box(0.7 * s, 0.25 * s, 0.05, 0x88ccff, [0, 0.58 * s, -0.76 * s]);
+        ws.material.transparent = true;
+        ws.material.opacity = 0.7;
         g.add(ws);
 
-        // red crosses on sides
-        const cm = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0.5 });
         [0.48, -0.48].forEach(x => {
-            g.add(this._box(0.03, 0.25*s, 0.35*s, 0xff0000, [x*s, 0.4*s, 0.1]));
-            g.add(this._box(0.03, 0.4*s, 0.2*s, 0xff0000, [x*s, 0.4*s, 0.1]));
+            g.add(this._box(0.03, 0.25 * s, 0.35 * s, 0xff0000, [x * s, 0.4 * s, 0.1]));
+            g.add(this._box(0.03, 0.4 * s, 0.2 * s, 0xff0000, [x * s, 0.4 * s, 0.1]));
         });
 
-        // front cross
-        g.add(this._box(0.3*s, 0.04, 0.03, 0xff0000, [0, 0.4*s, -0.81*s]));
-        g.add(this._box(0.04, 0.3*s, 0.03, 0xff0000, [0, 0.4*s, -0.81*s]));
+        g.add(this._box(0.3 * s, 0.04, 0.03, 0xff0000, [0, 0.4 * s, -0.81 * s]));
+        g.add(this._box(0.04, 0.3 * s, 0.03, 0xff0000, [0, 0.4 * s, -0.81 * s]));
 
-        // light bar
-        g.add(this._box(0.6*s, 0.1, 0.2, 0x333333, [0, 0.68*s, 0.1]));
+        g.add(this._box(0.6 * s, 0.1, 0.2, 0x333333, [0, 0.68 * s, 0.1]));
 
-        // red light
-        const lr = new THREE.Mesh(new THREE.SphereGeometry(0.1*s, 8, 8),
+        const lr = new THREE.Mesh(new THREE.SphereGeometry(0.1 * s, 8, 8),
             new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1 }));
-        lr.position.set(-0.2*s, 0.78*s, 0.1); lr.name = 'lightRed'; g.add(lr);
+        lr.position.set(-0.2 * s, 0.78 * s, 0.1);
+        lr.name = 'lightRed';
+        g.add(lr);
 
-        // blue light
-        const lb = new THREE.Mesh(new THREE.SphereGeometry(0.1*s, 8, 8),
+        const lb = new THREE.Mesh(new THREE.SphereGeometry(0.1 * s, 8, 8),
             new THREE.MeshStandardMaterial({ color: 0x0066ff, emissive: 0x0066ff, emissiveIntensity: 1 }));
-        lb.position.set(0.2*s, 0.78*s, 0.1); lb.name = 'lightBlue'; g.add(lb);
+        lb.position.set(0.2 * s, 0.78 * s, 0.1);
+        lb.name = 'lightBlue';
+        g.add(lb);
 
-        // wheels
         const wm = new THREE.MeshStandardMaterial({ color: 0x111111 });
-        const wg = new THREE.CylinderGeometry(0.12*s, 0.12*s, 0.1*s, 8);
-        [[-0.45,-0.45],[0.45,-0.45],[-0.45,0.45],[0.45,0.45]].forEach(([x,z]) => {
+        const wg = new THREE.CylinderGeometry(0.12 * s, 0.12 * s, 0.1 * s, 8);
+        [[-0.45, -0.45], [0.45, -0.45], [-0.45, 0.45], [0.45, 0.45]].forEach(([x, z]) => {
             const w = new THREE.Mesh(wg, wm);
-            w.position.set(x*s, 0.12*s, z*s); w.rotation.z = Math.PI/2; g.add(w);
+            w.position.set(x * s, 0.12 * s, z * s);
+            w.rotation.z = Math.PI / 2;
+            g.add(w);
         });
 
-        // emergency point light
-        const pl = new THREE.PointLight(0xff4444, 2, 6);
-        pl.position.set(0, 1.3, 0); pl.name = 'emergencyLight'; g.add(pl);
+        const pl = new THREE.PointLight(0xff4444, 3, 8);
+        pl.position.set(0, 1.5, 0);
+        pl.name = 'emergencyLight';
+        g.add(pl);
 
         return g;
     }
@@ -94,14 +196,16 @@ export class VehicleSystem {
             new THREE.BoxGeometry(w, h, d),
             new THREE.MeshStandardMaterial({ color, roughness: 0.4 })
         );
-        m.position.set(...pos); m.castShadow = true; m.receiveShadow = true;
+        m.position.set(...pos);
+        m.castShadow = true;
+        m.receiveShadow = true;
         return m;
     }
 
     setPath(ambIdx, gridPath) {
         if (ambIdx >= this.ambulances.length) return;
         const amb = this.ambulances[ambIdx];
-        amb.path = gridPath.map(([r,c]) => this.terrain.gridToWorld(r, c));
+        amb.path = gridPath.map(([r, c]) => this.terrain.gridToWorld(r, c));
         amb.pathIndex = 0;
         amb.moving = amb.path.length > 0;
         if (amb.path.length > 0) amb.targetWorldPos.copy(amb.path[0]);
@@ -111,15 +215,17 @@ export class VehicleSystem {
         if (idx >= this.ambulances.length) return;
         const amb = this.ambulances[idx];
         const wp = this.terrain.gridToWorld(row, col);
-        amb.mesh.position.set(wp.x, 0.2, wp.z);
-        amb.gridPos = [row, col]; amb.worldPos.copy(wp);
-        amb.targetWorldPos.copy(wp); amb.moving = false;
-        amb.path = []; amb.pathIndex = 0;
+        amb.mesh.position.set(wp.x, 2.2, wp.z);
+        amb.gridPos = [row, col];
+        amb.worldPos.copy(wp);
+        amb.targetWorldPos.copy(wp);
+        amb.moving = false;
+        amb.path = [];
+        amb.pathIndex = 0;
     }
 
     update(delta) {
         this.ambulances.forEach(amb => {
-            // flash lights
             amb.lightPhase += delta * 8;
             const flash = Math.sin(amb.lightPhase) > 0;
             const red = amb.mesh.getObjectByName('lightRed');
@@ -127,9 +233,16 @@ export class VehicleSystem {
             const pt = amb.mesh.getObjectByName('emergencyLight');
             if (red) red.material.emissiveIntensity = flash ? 1.0 : 0.1;
             if (blue) blue.material.emissiveIntensity = flash ? 0.1 : 1.0;
-            if (pt) { pt.intensity = flash ? 4 : 0.5; pt.color.setHex(flash ? 0xff0000 : 0x0066ff); }
+            if (pt) {
+                pt.intensity = flash ? 5 : 1;
+                pt.color.setHex(flash ? 0xff0000 : 0x0066ff);
+            }
 
-            // movement
+            const glow = amb.groundRing.getObjectByName('groundGlow');
+            if (glow) {
+                glow.material.opacity = flash ? 0.4 : 0.15;
+            }
+
             if (!amb.moving || amb.path.length === 0) return;
             const pos = amb.mesh.position;
             const tgt = amb.targetWorldPos;
@@ -138,15 +251,17 @@ export class VehicleSystem {
             if (dist < 0.2) {
                 amb.pathIndex++;
                 if (amb.pathIndex >= amb.path.length) {
-                    amb.moving = false; amb.pathIndex = 0;
+                    amb.moving = false;
+                    amb.pathIndex = 0;
                 } else {
                     amb.targetWorldPos.copy(amb.path[amb.pathIndex]);
                 }
             } else {
                 const dir = new THREE.Vector3().subVectors(tgt, pos).normalize();
                 pos.addScaledVector(dir, Math.min(this.speed * delta, dist));
-                pos.y = 0.2;
+                pos.y = 2.2;
                 amb.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+                amb.groundRing.rotation.y += delta * 2;
             }
         });
     }
