@@ -1,4 +1,4 @@
-// vehicles.js — 3 ambulances on road surfaces, smooth movement
+// vehicles.js — 3 ambulances on roads, rendered on top of buildings
 import * as THREE from 'three';
 const TILE_SIZE = 4;
 
@@ -24,21 +24,27 @@ export class VehicleSystem {
 
     _createAll() {
         START_POSITIONS.forEach((pos, i) => {
-            const mesh = this._buildAmbulance();
             const wp = this.terrain.gridToWorld(pos[0], pos[1]);
-            mesh.position.set(wp.x, 0.5, wp.z);
-            this.group.add(mesh);
+
+            const wrapper = new THREE.Group();
+            wrapper.renderOrder = 999;
+
+            const ambulanceModel = this._buildAmbulance();
+            wrapper.add(ambulanceModel);
 
             const nameSprite = this._makeNameSprite(AMB_NAMES[i], AMB_COLORS_HEX[i]);
-            nameSprite.position.set(wp.x, 2.2, wp.z);
-            this.group.add(nameSprite);
+            nameSprite.position.y = 2.0;
+            wrapper.add(nameSprite);
 
             const groundRing = this._makeGroundRing(AMB_COLORS_HEX[i]);
-            groundRing.position.set(wp.x, 0.05, wp.z);
-            this.group.add(groundRing);
+            groundRing.position.y = -0.44;
+            wrapper.add(groundRing);
+
+            wrapper.position.set(wp.x, 0.5, wp.z);
+            this.group.add(wrapper);
 
             this.ambulances.push({
-                mesh,
+                mesh: wrapper,
                 nameSprite,
                 groundRing,
                 gridPos: [...pos],
@@ -57,11 +63,11 @@ export class VehicleSystem {
         canvas.width = 256;
         canvas.height = 80;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
         ctx.beginPath();
         ctx.roundRect(4, 4, 248, 72, 10);
         ctx.fill();
-        ctx.font = 'bold 40px monospace';
+        ctx.font = 'bold 44px monospace';
         ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -69,23 +75,26 @@ export class VehicleSystem {
         const tex = new THREE.CanvasTexture(canvas);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
         const sprite = new THREE.Sprite(mat);
-        sprite.scale.set(2.5, 0.8, 1);
+        sprite.scale.set(2.8, 0.9, 1);
+        sprite.renderOrder = 1000;
         return sprite;
     }
 
     _makeGroundRing(color) {
         const g = new THREE.Group();
         const ring = new THREE.Mesh(
-            new THREE.RingGeometry(1.0, 1.2, 32),
-            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
+            new THREE.RingGeometry(1.0, 1.3, 32),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthTest: false })
         );
         ring.rotation.x = -Math.PI / 2;
+        ring.renderOrder = 998;
         g.add(ring);
         const disc = new THREE.Mesh(
             new THREE.CircleGeometry(0.7, 16),
-            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.2, side: THREE.DoubleSide })
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthTest: false })
         );
         disc.rotation.x = -Math.PI / 2;
+        disc.renderOrder = 997;
         g.add(disc);
         return g;
     }
@@ -113,23 +122,26 @@ export class VehicleSystem {
         g.add(this._box(0.6 * s, 0.1, 0.2, 0x333333, [0, 0.68 * s, 0.1]));
 
         const lr = new THREE.Mesh(new THREE.SphereGeometry(0.1 * s, 8, 8),
-            new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1 }));
+            new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1, depthTest: false }));
         lr.position.set(-0.2 * s, 0.78 * s, 0.1);
         lr.name = 'lightRed';
+        lr.renderOrder = 1001;
         g.add(lr);
 
         const lb = new THREE.Mesh(new THREE.SphereGeometry(0.1 * s, 8, 8),
-            new THREE.MeshStandardMaterial({ color: 0x0066ff, emissive: 0x0066ff, emissiveIntensity: 1 }));
+            new THREE.MeshStandardMaterial({ color: 0x0066ff, emissive: 0x0066ff, emissiveIntensity: 1, depthTest: false }));
         lb.position.set(0.2 * s, 0.78 * s, 0.1);
         lb.name = 'lightBlue';
+        lb.renderOrder = 1001;
         g.add(lb);
 
-        const wm = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        const wm = new THREE.MeshStandardMaterial({ color: 0x111111, depthTest: false });
         const wg = new THREE.CylinderGeometry(0.12 * s, 0.12 * s, 0.1 * s, 8);
         [[-0.45, -0.45], [0.45, -0.45], [-0.45, 0.45], [0.45, 0.45]].forEach(([x, z]) => {
             const w = new THREE.Mesh(wg, wm);
             w.position.set(x * s, 0.12 * s, z * s);
             w.rotation.z = Math.PI / 2;
+            w.renderOrder = 1001;
             g.add(w);
         });
 
@@ -138,17 +150,25 @@ export class VehicleSystem {
         pl.name = 'emergencyLight';
         g.add(pl);
 
+        g.traverse(child => {
+            if (child.isMesh) {
+                child.renderOrder = 999;
+                child.material.depthTest = false;
+            }
+        });
+
         return g;
     }
 
     _box(w, h, d, color, pos) {
         const m = new THREE.Mesh(
             new THREE.BoxGeometry(w, h, d),
-            new THREE.MeshStandardMaterial({ color, roughness: 0.4 })
+            new THREE.MeshStandardMaterial({ color, roughness: 0.4, depthTest: false })
         );
         m.position.set(...pos);
-        m.castShadow = true;
-        m.receiveShadow = true;
+        m.castShadow = false;
+        m.receiveShadow = false;
+        m.renderOrder = 999;
         return m;
     }
 
@@ -166,8 +186,6 @@ export class VehicleSystem {
         const amb = this.ambulances[idx];
         const wp = this.terrain.gridToWorld(row, col);
         amb.mesh.position.set(wp.x, 0.5, wp.z);
-        amb.nameSprite.position.set(wp.x, 2.2, wp.z);
-        amb.groundRing.position.set(wp.x, 0.05, wp.z);
         amb.gridPos = [row, col];
         amb.worldPos.copy(wp);
         amb.targetWorldPos.copy(wp);
@@ -208,13 +226,6 @@ export class VehicleSystem {
                 pos.addScaledVector(dir, Math.min(this.speed * delta, dist));
                 pos.y = 0.5;
                 amb.mesh.rotation.y = Math.atan2(dir.x, dir.z);
-
-                amb.nameSprite.position.x = pos.x;
-                amb.nameSprite.position.z = pos.z;
-                amb.nameSprite.position.y = 2.2;
-
-                amb.groundRing.position.x = pos.x;
-                amb.groundRing.position.z = pos.z;
             }
         });
     }
