@@ -1,7 +1,8 @@
-// simulation.js — full 20-step simulation with 3 ambulances, floods, rescue
+// simulation.js — 3 ambulances rescue 12 civilians, floods, roads
 import { GRID_ROWS, GRID_COLS, zoneGrid, roadEdges, primaryHospital, primaryDepot } from './cityData.js';
 
-const AMBULANCE_COLORS = [0x3cff8c, 0xff6b3c, 0x44aaff];
+const AMB_COLORS = [0x3cff8c, 0xff6b3c, 0x44aaff];
+const AMB_STARTS = [[1,5], [5,4], [8,8]];
 
 export class SimulationController {
     constructor(vehicles, pathViz, floods, heatmap, ui) {
@@ -15,46 +16,38 @@ export class SimulationController {
         this.totalSteps = 20;
         this.playing = false;
         this.stepTimer = 0;
-        this.stepInterval = 3.0;
+        this.stepInterval = 3.5;
         this.civiliansRescued = 0;
-        this.totalCivilians = 12;
-        this.blockedRoads = [];
         this.floodCount = 0;
+        this.blockedRoads = [];
+        this.finished = false;
 
         this.civilians = this._pickCivilians();
-        this.ambAssignments = [
-            { ambIdx: 0, civIndices: [0, 1, 2, 3], startPos: [1, 4] },
-            { ambIdx: 1, civIndices: [4, 5, 6, 7], startPos: [6, 4] },
-            { ambIdx: 2, civIndices: [8, 9, 10, 11], startPos: [9, 8] },
+        // distribute 12 civilians across 3 ambulances
+        this.ambTasks = [
+            { idx: 0, civs: [0,1,2,3], teamPos: [...AMB_STARTS[0]] },
+            { idx: 1, civs: [4,5,6,7], teamPos: [...AMB_STARTS[1]] },
+            { idx: 2, civs: [8,9,10,11], teamPos: [...AMB_STARTS[2]] },
         ];
-        this.ambCurrentIdx = [0, 0, 0];
-        this.ambTeamPos = this.ambAssignments.map(a => [...a.startPos]);
+        this.ambCivIdx = [0, 0, 0];
 
         this._bindButtons();
     }
 
     _pickCivilians() {
         const civs = [];
-        const occupied = new Set([
-            primaryHospital.join(','), primaryDepot.join(',')
-        ]);
-        const rng = this._seededRandom(42);
-        while (civs.length < this.totalCivilians) {
-            const r = Math.floor(rng() * GRID_ROWS);
-            const c = Math.floor(rng() * GRID_COLS);
-            const key = `${r},${c}`;
-            if (!occupied.has(key) && zoneGrid[r][c] === 'Residential') {
-                civs.push([r, c]);
-                occupied.add(key);
+        const occ = new Set([primaryHospital.join(','), primaryDepot.join(','), ...AMB_STARTS.map(a=>a.join(','))]);
+        const rng = this._rng(42);
+        while (civs.length < 12) {
+            const r = Math.floor(rng()*GRID_ROWS), c = Math.floor(rng()*GRID_COLS);
+            if (!occ.has(`${r},${c}`) && zoneGrid[r][c] === 'Residential') {
+                civs.push([r,c]); occ.add(`${r},${c}`);
             }
         }
         return civs;
     }
 
-    _seededRandom(seed) {
-        let s = seed;
-        return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
-    }
+    _rng(seed) { let s=seed; return ()=>{s=(s*16807)%2147483647;return(s-1)/2147483646;}; }
 
     _bindButtons() {
         if (!this.ui) return;
@@ -65,155 +58,135 @@ export class SimulationController {
 
     play() {
         this.playing = true;
-        if (this.step === 0) {
-            this.step = 1;
-            this._runStep();
-        }
-        if (this.ui) this.ui.showToast('Simulation started', 'success');
+        if (this.step === 0 && !this.finished) { this.step = 1; this._runStep(); }
+        if (this.ui) this.ui.showToast('Simulation started — 3 ambulances active', 'success');
     }
 
     pause() {
         this.playing = false;
-        if (this.ui) this.ui.showToast('Simulation paused', 'warning');
+        if (this.ui) this.ui.showToast('Paused', 'warning');
     }
 
     reset() {
-        this.playing = false;
-        this.step = 0;
-        this.stepTimer = 0;
-        this.civiliansRescued = 0;
-        this.floodCount = 0;
+        this.playing = false; this.step = 0; this.stepTimer = 0;
+        this.civiliansRescued = 0; this.floodCount = 0; this.finished = false;
         this.blockedRoads = [];
         this.civilians = this._pickCivilians();
-        this.ambCurrentIdx = [0, 0, 0];
-        this.ambTeamPos = this.ambAssignments.map(a => [...a.startPos]);
+        this.ambCivIdx = [0,0,0];
+        this.ambTasks.forEach((t,i) => { t.teamPos = [...AMB_STARTS[i]]; });
 
-        this.floods.clearAll();
-        this.pathViz.clearAll();
-
-        this.vehicles.teleportTo(0, 1, 4);
-        this.vehicles.teleportTo(1, 6, 4);
-        this.vehicles.teleportTo(2, 9, 8);
+        this.floods.clearAll(); this.pathViz.clearAll();
+        this.vehicles.teleportTo(0, AMB_STARTS[0][0], AMB_STARTS[0][1]);
+        this.vehicles.teleportTo(1, AMB_STARTS[1][0], AMB_STARTS[1][1]);
+        this.vehicles.teleportTo(2, AMB_STARTS[2][0], AMB_STARTS[2][1]);
 
         if (this.ui) {
             this.ui.updateStep(0);
             this.ui.updateStats({ rescued: 0, floods: 0 });
-            this.ui.addLogEntry('System', 'Simulation reset — ready', 'system');
+            this.ui.addLogEntry('System', 'Reset — click Play to begin', 'system');
         }
     }
 
     _runStep() {
         if (this.step > this.totalSteps) {
-            this.playing = false;
-            if (this.ui) this.ui.showToast('All 20 steps complete!', 'success');
+            this.playing = false; this.finished = true;
+            if (this.ui) {
+                this.ui.showToast(`SIMULATION COMPLETE — ${this.civiliansRescued} civilians rescued!`, 'success');
+                this.ui.addLogEntry('System', '=== ALL 20 STEPS COMPLETE ===', 'system');
+            }
+            // return all ambulances to depots
+            this.vehicles.setPath(0, [[1,5],[1,4]]);  // back to hospital
+            this.vehicles.setPath(1, [[5,4],[6,4]]);   // back to depot
+            this.vehicles.setPath(2, [[8,8],[9,8]]);   // back to depot
+            this.pathViz.clearAll();
+            if (this.ui) {
+                this.ui.showToast('All ambulances returning to depots', 'info');
+                this.ui.addLogEntry('System', 'All ambulances returning to base', 'system');
+            }
             return;
         }
         this.stepTimer = 0;
 
         this._doFlood();
 
-        this.ambAssignments.forEach((assignment, ambSlot) => {
-            this._routeAmbulance(ambSlot, assignment);
-        });
+        this.ambTasks.forEach((task, slot) => this._routeAmbulance(slot, task));
 
-        if (this.step % 3 === 0 && this.blockedRoads.length > 0) {
-            this._doRecovery();
-        }
+        if (this.step % 3 === 0 && this.blockedRoads.length > 0) this._doRecovery();
 
         if (this.ui) {
             this.ui.updateStep(this.step);
             this.ui.updateStats({ rescued: this.civiliansRescued, floods: this.floodCount });
         }
-
         this.step++;
     }
 
     _doFlood() {
-        const rng = this._seededRandom(this.step * 7 + 13);
-        const numFloods = Math.min(2, Math.floor(rng() * 3));
-
-        for (let i = 0; i < numFloods; i++) {
-            if (this.blockedRoads.length >= 12) return;
-            const edgeIdx = Math.floor(rng() * roadEdges.length);
-            const edge = roadEdges[edgeIdx];
+        const rng = this._rng(this.step * 7 + 13);
+        const n = Math.min(2, Math.floor(rng() * 3));
+        for (let i = 0; i < n; i++) {
+            if (this.blockedRoads.length >= 10) return;
+            const idx = Math.floor(rng() * roadEdges.length);
+            const edge = roadEdges[idx];
             const key = `${edge[0][0]},${edge[0][1]}-${edge[1][0]},${edge[1][1]}`;
             if (!this.blockedRoads.find(b => b.key === key)) {
                 this.blockedRoads.push({ key, edge: [...edge] });
                 this.floods.addFlood(edge[0][0], edge[0][1], edge[1][0], edge[1][1], `s${this.step}f${i}`);
                 this.floodCount++;
-                if (this.ui) {
-                    this.ui.addLogEntry('Flood', `Step ${this.step}: road (${edge[0]}) ↔ (${edge[1]}) flooded`, 'flood');
-                }
+                if (this.ui) this.ui.addLogEntry('FLOOD', `Step ${this.step}: (${edge[0]}) <-> (${edge[1]}) BLOCKED`, 'flood');
             }
         }
     }
 
     _doRecovery() {
-        const recovered = this.blockedRoads.pop();
-        if (recovered) {
-            const [a, b] = recovered.edge;
-            this.floods.removeFloodByEdge(a[0], a[1], b[0], b[1]);
+        const rec = this.blockedRoads.pop();
+        if (rec) {
+            const [a,b] = rec.edge;
+            this.floods.removeFloodByEdge(a[0],a[1],b[0],b[1]);
             this.floodCount = Math.max(0, this.floodCount - 1);
-            if (this.ui) {
-                this.ui.addLogEntry('Restore', `Step ${this.step}: road (${a}) ↔ (${b}) restored`, 'restore');
-            }
+            if (this.ui) this.ui.addLogEntry('RESTORE', `Step ${this.step}: (${a}) <-> (${b}) restored`, 'restore');
         }
     }
 
-    _routeAmbulance(ambSlot, assignment) {
-        if (this.ambCurrentIdx[ambSlot] >= assignment.civIndices.length) return;
-
-        const civIdx = assignment.civIndices[this.ambCurrentIdx[ambSlot]];
+    _routeAmbulance(slot, task) {
+        if (this.ambCivIdx[slot] >= task.civs.length) return;
+        const civIdx = task.civs[this.ambCivIdx[slot]];
         if (civIdx >= this.civilians.length) return;
         const civ = this.civilians[civIdx];
 
-        const path = this._bfsPath(this.ambTeamPos[ambSlot], civ);
-        if (path.length === 0) {
-            this.ambCurrentIdx[ambSlot]++;
-            return;
-        }
+        const path = this._bfs(task.teamPos, civ);
+        if (path.length === 0) { this.ambCivIdx[slot]++; return; }
 
-        const color = AMBULANCE_COLORS[ambSlot];
-        this.pathViz.showPath(path, color, `amb${ambSlot}_s${this.step}`);
-
-        this.vehicles.setPath(ambSlot, path);
-
-        this.ambTeamPos[ambSlot] = [...civ];
+        this.pathViz.showPath(path, AMB_COLORS[slot], `amb${slot}_s${this.step}`);
+        this.vehicles.setPath(slot, path);
+        task.teamPos = [...civ];
         this.civiliansRescued++;
 
+        const names = ['Alpha','Bravo','Charlie'];
         if (this.ui) {
-            const ambNames = ['Alpha', 'Bravo', 'Charlie'];
-            this.ui.addLogEntry('Route',
-                `Amb ${ambNames[ambSlot]} → civilian #${this.civiliansRescued} at (${civ}) [${path.length} hops]`,
-                'system'
-            );
+            this.ui.addLogEntry('RESCUE', `${names[slot]} -> civilian #${this.civiliansRescued} at (${civ}) [${path.length} steps]`, 'system');
+            this.ui.showToast(`${names[slot]} rescuing civilian ${this.civiliansRescued}`, 'info');
         }
-
-        this.ambCurrentIdx[ambSlot]++;
+        this.ambCivIdx[slot]++;
     }
 
-    _bfsPath(start, goal) {
-        if (start[0] === goal[0] && start[1] === goal[1]) return [start];
-        const visited = new Set([start.join(',')]);
-        const queue = [[start]];
-        while (queue.length > 0) {
-            const pathSoFar = queue.shift();
-            const cur = pathSoFar[pathSoFar.length - 1];
-            for (const [dr, dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
-                const nr = cur[0] + dr, nc = cur[1] + dc;
-                if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
-                const key = `${nr},${nc}`;
-                if (visited.has(key)) continue;
-                const blocked = this.blockedRoads.some(b => {
-                    const [a, bE] = b.edge;
-                    return (a[0]===cur[0]&&a[1]===cur[1]&&bE[0]===nr&&bE[1]===nc) ||
-                           (bE[0]===cur[0]&&bE[1]===cur[1]&&a[0]===nr&&a[1]===nc);
-                });
-                if (blocked) continue;
-                visited.add(key);
-                const newPath = [...pathSoFar, [nr, nc]];
-                if (nr === goal[0] && nc === goal[1]) return newPath;
-                queue.push(newPath);
+    _bfs(start, goal) {
+        if (start[0]===goal[0]&&start[1]===goal[1]) return [start];
+        const vis = new Set([start.join(',')]);
+        const q = [[start]];
+        while (q.length) {
+            const p = q.shift(), cur = p[p.length-1];
+            for (const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+                const nr=cur[0]+dr, nc=cur[1]+dc;
+                if (nr<0||nr>=GRID_ROWS||nc<0||nc>=GRID_COLS) continue;
+                if (vis.has(`${nr},${nc}`)) continue;
+                if (this.blockedRoads.some(b => {
+                    const [a,bE]=b.edge;
+                    return (a[0]===cur[0]&&a[1]===cur[1]&&bE[0]===nr&&bE[1]===nc)||(bE[0]===cur[0]&&bE[1]===cur[1]&&a[0]===nr&&a[1]===nc);
+                })) continue;
+                vis.add(`${nr},${nc}`);
+                const np=[...p,[nr,nc]];
+                if (nr===goal[0]&&nc===goal[1]) return np;
+                q.push(np);
             }
         }
         return [];
@@ -222,8 +195,6 @@ export class SimulationController {
     update(delta) {
         if (!this.playing) return;
         this.stepTimer += delta;
-        if (this.stepTimer >= this.stepInterval) {
-            this._runStep();
-        }
+        if (this.stepTimer >= this.stepInterval) this._runStep();
     }
 }

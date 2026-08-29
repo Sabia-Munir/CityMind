@@ -1,15 +1,13 @@
-// vehicles.js — 3D ambulance models with smooth path animation
+// vehicles.js — 3 ambulances on road surfaces, smooth movement
 import * as THREE from 'three';
-import { ambulancePositions } from './cityData.js';
-
 const TILE_SIZE = 4;
 
-// Ambulances placed at road midpoints (between cells), not inside buildings
-// Road from (0,4)→(0,5), (5,3)→(5,4), (9,6)→(9,7)
-const AMBULANCE_ROAD_POSITIONS = [
-    { row: 0, col: 0.5 },   // on road between (0,4) and (0,5)
-    { row: 5, col: 3.5 },   // on road between (5,3) and (5,4)
-    { row: 9, col: 6.5 },   // on road between (9,6) and (9,7)
+// Each ambulance starts on a road segment near its depot
+// gridToWorld converts integer (row,col) to world center of that tile
+const START_POSITIONS = [
+    [1, 5],  // amb0 on road next to hospital [1,4]
+    [5, 4],  // amb1 on road near depot [6,4] 
+    [8, 8],  // amb2 on road near depot [9,8]
 ];
 
 export class VehicleSystem {
@@ -20,184 +18,136 @@ export class VehicleSystem {
         this.group.name = 'vehicles';
         this.scene.add(this.group);
         this.ambulances = [];
-        this.animationSpeed = 2.5;
-
-        this._createAmbulances();
+        this.speed = 4.0;
+        this._createAll();
     }
 
-    _createAmbulances() {
-        AMBULANCE_ROAD_POSITIONS.forEach((pos, index) => {
-            const ambulance = this._buildAmbulance(index);
-            const worldPos = this.terrain.gridToWorld(pos.row, pos.col);
-            ambulance.position.set(worldPos.x, 0.15, worldPos.z);
-            this.group.add(ambulance);
+    _createAll() {
+        START_POSITIONS.forEach((pos, i) => {
+            const mesh = this._buildAmbulance();
+            const wp = this.terrain.gridToWorld(pos[0], pos[1]);
+            mesh.position.set(wp.x, 0.2, wp.z);
+            this.group.add(mesh);
             this.ambulances.push({
-                mesh: ambulance,
-                gridPos: [pos.row, pos.col],
-                worldPos: worldPos.clone(),
-                targetWorldPos: worldPos.clone(),
-                path: [],
-                pathIndex: 0,
-                moving: false,
-                speed: this.animationSpeed,
-                lightPhase: Math.random() * Math.PI * 2,
+                mesh, gridPos: [...pos], worldPos: wp.clone(),
+                targetWorldPos: wp.clone(), path: [], pathIndex: 0,
+                moving: false, lightPhase: Math.random() * 6.28,
+                currentStep: -1,
             });
         });
     }
 
-    _buildAmbulance(index) {
-        const group = new THREE.Group();
-        const scale = 1.4;
+    _buildAmbulance() {
+        const g = new THREE.Group();
+        const s = 1.6; // scale
 
         // body
-        const body = new THREE.Mesh(
-            new THREE.BoxGeometry(0.9 * scale, 0.5 * scale, 1.6 * scale),
-            new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.1 })
-        );
-        body.position.y = 0.35 * scale;
-        body.castShadow = true;
-        body.receiveShadow = true;
-        group.add(body);
-
-        // cabin (front)
-        const cabin = new THREE.Mesh(
-            new THREE.BoxGeometry(0.8 * scale, 0.4 * scale, 0.5 * scale),
-            new THREE.MeshStandardMaterial({ color: 0xeeeeee })
-        );
-        cabin.position.set(0, 0.55 * scale, -0.5 * scale);
-        cabin.castShadow = true;
-        group.add(cabin);
-
+        g.add(this._box(0.9*s, 0.45*s, 1.6*s, 0xffffff, [0, 0.35*s, 0]));
+        // cabin
+        g.add(this._box(0.8*s, 0.35*s, 0.5*s, 0xeeeeee, [0, 0.52*s, -0.5*s]));
         // windshield
-        const windshield = new THREE.Mesh(
-            new THREE.BoxGeometry(0.7 * scale, 0.3 * scale, 0.05),
-            new THREE.MeshStandardMaterial({ color: 0x88ccff, transparent: true, opacity: 0.6, metalness: 0.3 })
-        );
-        windshield.position.set(0, 0.6 * scale, -0.76 * scale);
-        group.add(windshield);
+        const ws = this._box(0.7*s, 0.25*s, 0.05, 0x88ccff, [0, 0.58*s, -0.76*s]);
+        ws.material.transparent = true; ws.material.opacity = 0.7;
+        g.add(ws);
 
-        // red cross on both sides
-        const crossMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0.3 });
-        [0.47, -0.47].forEach(xOff => {
-            const h = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.2 * scale, 0.4 * scale), crossMat);
-            h.position.set(xOff * scale, 0.45 * scale, 0.1);
-            group.add(h);
-            const v = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.4 * scale, 0.2 * scale), crossMat);
-            v.position.set(xOff * scale, 0.45 * scale, 0.1);
-            group.add(v);
+        // red crosses on sides
+        const cm = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0.5 });
+        [0.48, -0.48].forEach(x => {
+            g.add(this._box(0.03, 0.25*s, 0.35*s, 0xff0000, [x*s, 0.4*s, 0.1]));
+            g.add(this._box(0.03, 0.4*s, 0.2*s, 0xff0000, [x*s, 0.4*s, 0.1]));
         });
 
         // front cross
-        const fh = new THREE.Mesh(new THREE.BoxGeometry(0.3 * scale, 0.04, 0.02), crossMat);
-        fh.position.set(0, 0.4 * scale, -0.81 * scale);
-        group.add(fh);
-        const fv = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.3 * scale, 0.02), crossMat);
-        fv.position.set(0, 0.4 * scale, -0.81 * scale);
-        group.add(fv);
+        g.add(this._box(0.3*s, 0.04, 0.03, 0xff0000, [0, 0.4*s, -0.81*s]));
+        g.add(this._box(0.04, 0.3*s, 0.03, 0xff0000, [0, 0.4*s, -0.81*s]));
 
         // light bar
-        const lightBar = new THREE.Mesh(
-            new THREE.BoxGeometry(0.6 * scale, 0.12, 0.22),
-            new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.5 })
-        );
-        lightBar.position.set(0, 0.68 * scale, 0.1);
-        group.add(lightBar);
+        g.add(this._box(0.6*s, 0.1, 0.2, 0x333333, [0, 0.68*s, 0.1]));
 
-        const lightRed = new THREE.Mesh(
-            new THREE.SphereGeometry(0.1 * scale, 8, 8),
-            new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1.0 })
-        );
-        lightRed.position.set(-0.2 * scale, 0.78 * scale, 0.1);
-        lightRed.name = 'lightRed';
-        group.add(lightRed);
+        // red light
+        const lr = new THREE.Mesh(new THREE.SphereGeometry(0.1*s, 8, 8),
+            new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1 }));
+        lr.position.set(-0.2*s, 0.78*s, 0.1); lr.name = 'lightRed'; g.add(lr);
 
-        const lightBlue = new THREE.Mesh(
-            new THREE.SphereGeometry(0.1 * scale, 8, 8),
-            new THREE.MeshStandardMaterial({ color: 0x0044ff, emissive: 0x0044ff, emissiveIntensity: 1.0 })
-        );
-        lightBlue.position.set(0.2 * scale, 0.78 * scale, 0.1);
-        lightBlue.name = 'lightBlue';
-        group.add(lightBlue);
+        // blue light
+        const lb = new THREE.Mesh(new THREE.SphereGeometry(0.1*s, 8, 8),
+            new THREE.MeshStandardMaterial({ color: 0x0066ff, emissive: 0x0066ff, emissiveIntensity: 1 }));
+        lb.position.set(0.2*s, 0.78*s, 0.1); lb.name = 'lightBlue'; g.add(lb);
 
         // wheels
-        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-        const wheelGeo = new THREE.CylinderGeometry(0.13 * scale, 0.13 * scale, 0.1 * scale, 8);
-        [[-0.45, -0.45], [0.45, -0.45], [-0.45, 0.45], [0.45, 0.45]].forEach(([x, z]) => {
-            const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-            wheel.position.set(x * scale, 0.13 * scale, z * scale);
-            wheel.rotation.z = Math.PI / 2;
-            group.add(wheel);
+        const wm = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        const wg = new THREE.CylinderGeometry(0.12*s, 0.12*s, 0.1*s, 8);
+        [[-0.45,-0.45],[0.45,-0.45],[-0.45,0.45],[0.45,0.45]].forEach(([x,z]) => {
+            const w = new THREE.Mesh(wg, wm);
+            w.position.set(x*s, 0.12*s, z*s); w.rotation.z = Math.PI/2; g.add(w);
         });
 
         // emergency point light
-        const ptLight = new THREE.PointLight(0xff4444, 0, 5);
-        ptLight.position.set(0, 1.2, 0);
-        ptLight.name = 'emergencyLight';
-        group.add(ptLight);
+        const pl = new THREE.PointLight(0xff4444, 2, 6);
+        pl.position.set(0, 1.3, 0); pl.name = 'emergencyLight'; g.add(pl);
 
-        return group;
+        return g;
     }
 
-    setPath(ambulanceIndex, pathCoords) {
-        if (ambulanceIndex >= this.ambulances.length) return;
-        const amb = this.ambulances[ambulanceIndex];
-        amb.path = pathCoords.map(([r, c]) => this.terrain.gridToWorld(r, c));
+    _box(w, h, d, color, pos) {
+        const m = new THREE.Mesh(
+            new THREE.BoxGeometry(w, h, d),
+            new THREE.MeshStandardMaterial({ color, roughness: 0.4 })
+        );
+        m.position.set(...pos); m.castShadow = true; m.receiveShadow = true;
+        return m;
+    }
+
+    setPath(ambIdx, gridPath) {
+        if (ambIdx >= this.ambulances.length) return;
+        const amb = this.ambulances[ambIdx];
+        amb.path = gridPath.map(([r,c]) => this.terrain.gridToWorld(r, c));
         amb.pathIndex = 0;
         amb.moving = amb.path.length > 0;
-        if (amb.path.length > 0) {
-            amb.targetWorldPos.copy(amb.path[0]);
-        }
+        if (amb.path.length > 0) amb.targetWorldPos.copy(amb.path[0]);
+    }
+
+    teleportTo(idx, row, col) {
+        if (idx >= this.ambulances.length) return;
+        const amb = this.ambulances[idx];
+        const wp = this.terrain.gridToWorld(row, col);
+        amb.mesh.position.set(wp.x, 0.2, wp.z);
+        amb.gridPos = [row, col]; amb.worldPos.copy(wp);
+        amb.targetWorldPos.copy(wp); amb.moving = false;
+        amb.path = []; amb.pathIndex = 0;
     }
 
     update(delta) {
         this.ambulances.forEach(amb => {
             // flash lights
-            amb.lightPhase += delta * 6;
+            amb.lightPhase += delta * 8;
             const flash = Math.sin(amb.lightPhase) > 0;
-
             const red = amb.mesh.getObjectByName('lightRed');
             const blue = amb.mesh.getObjectByName('lightBlue');
             const pt = amb.mesh.getObjectByName('emergencyLight');
             if (red) red.material.emissiveIntensity = flash ? 1.0 : 0.1;
             if (blue) blue.material.emissiveIntensity = flash ? 0.1 : 1.0;
-            if (pt) {
-                pt.intensity = flash ? 3.0 : 0.5;
-                pt.color.setHex(flash ? 0xff0000 : 0x0044ff);
-            }
+            if (pt) { pt.intensity = flash ? 4 : 0.5; pt.color.setHex(flash ? 0xff0000 : 0x0066ff); }
 
-            // move along path
-            if (amb.moving && amb.path.length > 0) {
-                const pos = amb.mesh.position;
-                const tgt = amb.targetWorldPos;
-                const dist = pos.distanceTo(tgt);
+            // movement
+            if (!amb.moving || amb.path.length === 0) return;
+            const pos = amb.mesh.position;
+            const tgt = amb.targetWorldPos;
+            const dist = pos.distanceTo(tgt);
 
-                if (dist < 0.15) {
-                    amb.pathIndex++;
-                    if (amb.pathIndex >= amb.path.length) {
-                        amb.moving = false;
-                        amb.pathIndex = 0;
-                    } else {
-                        amb.targetWorldPos.copy(amb.path[amb.pathIndex]);
-                    }
+            if (dist < 0.2) {
+                amb.pathIndex++;
+                if (amb.pathIndex >= amb.path.length) {
+                    amb.moving = false; amb.pathIndex = 0;
                 } else {
-                    const dir = new THREE.Vector3().subVectors(tgt, pos).normalize();
-                    const moveAmt = amb.speed * delta;
-                    pos.add(dir.multiplyScalar(Math.min(moveAmt, dist)));
-                    pos.y = 0.15;
-                    amb.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+                    amb.targetWorldPos.copy(amb.path[amb.pathIndex]);
                 }
+            } else {
+                const dir = new THREE.Vector3().subVectors(tgt, pos).normalize();
+                pos.addScaledVector(dir, Math.min(this.speed * delta, dist));
+                pos.y = 0.2;
+                amb.mesh.rotation.y = Math.atan2(dir.x, dir.z);
             }
         });
-    }
-
-    teleportTo(index, row, col) {
-        if (index >= this.ambulances.length) return;
-        const amb = this.ambulances[index];
-        const wp = this.terrain.gridToWorld(row, col);
-        amb.mesh.position.set(wp.x, 0.15, wp.z);
-        amb.gridPos = [row, col];
-        amb.worldPos.copy(wp);
-        amb.targetWorldPos.copy(wp);
-        amb.moving = false;
     }
 }
