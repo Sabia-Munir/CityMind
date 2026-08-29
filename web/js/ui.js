@@ -8,6 +8,7 @@ export class UIController {
         this.stepDisplay = document.getElementById('step-num');
         this.callbacks = {};
         this._bindControls();
+        this._bindKeyboard();
         this.addLogEntry('System', 'CityMind 3D initialized', 'system');
     }
 
@@ -43,6 +44,16 @@ export class UIController {
         });
         document.getElementById('toggle-vehicles')?.addEventListener('change', (e) => {
             this._fire('toggleVehicles', e.target.checked);
+        });
+    }
+
+    _bindKeyboard() {
+        window.addEventListener('keydown', (e) => {
+            switch (e.key.toLowerCase()) {
+                case ' ': e.preventDefault(); this._fire('play'); break;
+                case 'p': this._fire('pause'); break;
+                case 'r': this._fire('reset'); break;
+            }
         });
     }
 
