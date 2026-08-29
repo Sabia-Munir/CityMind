@@ -3,6 +3,8 @@ import { GRID_ROWS, GRID_COLS, zoneGrid, roadEdges, primaryHospital, primaryDepo
 
 const AMB_COLORS = [0x3cff8c, 0xff6b3c, 0x44aaff];
 const AMB_STARTS = [[1,5], [5,4], [8,8]];
+const AMB_DEPOTS = [[1,4], [6,4], [9,8]];
+const AMB_NAMES = ['Alpha', 'Bravo', 'Charlie'];
 
 export class SimulationController {
     constructor(vehicles, pathViz, floods, heatmap, ui) {
@@ -23,11 +25,10 @@ export class SimulationController {
         this.finished = false;
 
         this.civilians = this._pickCivilians();
-        // distribute 12 civilians across 3 ambulances
         this.ambTasks = [
-            { idx: 0, civs: [0,1,2,3], teamPos: [...AMB_STARTS[0]] },
-            { idx: 1, civs: [4,5,6,7], teamPos: [...AMB_STARTS[1]] },
-            { idx: 2, civs: [8,9,10,11], teamPos: [...AMB_STARTS[2]] },
+            { idx: 0, civs: [0,1,2,3], teamPos: [...AMB_STARTS[0]], returning: false, done: false },
+            { idx: 1, civs: [4,5,6,7], teamPos: [...AMB_STARTS[1]], returning: false, done: false },
+            { idx: 2, civs: [8,9,10,11], teamPos: [...AMB_STARTS[2]], returning: false, done: false },
         ];
         this.ambCivIdx = [0, 0, 0];
 
@@ -73,7 +74,11 @@ export class SimulationController {
         this.blockedRoads = [];
         this.civilians = this._pickCivilians();
         this.ambCivIdx = [0,0,0];
-        this.ambTasks.forEach((t,i) => { t.teamPos = [...AMB_STARTS[i]]; });
+        this.ambTasks = [
+            { idx: 0, civs: [0,1,2,3], teamPos: [...AMB_STARTS[0]], returning: false, done: false },
+            { idx: 1, civs: [4,5,6,7], teamPos: [...AMB_STARTS[1]], returning: false, done: false },
+            { idx: 2, civs: [8,9,10,11], teamPos: [...AMB_STARTS[2]], returning: false, done: false },
+        ];
 
         this.floods.clearAll(); this.pathViz.clearAll();
         this.vehicles.teleportTo(0, AMB_STARTS[0][0], AMB_STARTS[0][1]);
@@ -89,20 +94,7 @@ export class SimulationController {
 
     _runStep() {
         if (this.step > this.totalSteps) {
-            this.playing = false; this.finished = true;
-            if (this.ui) {
-                this.ui.showToast(`SIMULATION COMPLETE — ${this.civiliansRescued} civilians rescued!`, 'success');
-                this.ui.addLogEntry('System', '=== ALL 20 STEPS COMPLETE ===', 'system');
-            }
-            // return all ambulances to depots
-            this.vehicles.setPath(0, [[1,5],[1,4]]);  // back to hospital
-            this.vehicles.setPath(1, [[5,4],[6,4]]);   // back to depot
-            this.vehicles.setPath(2, [[8,8],[9,8]]);   // back to depot
-            this.pathViz.clearAll();
-            if (this.ui) {
-                this.ui.showToast('All ambulances returning to depots', 'info');
-                this.ui.addLogEntry('System', 'All ambulances returning to base', 'system');
-            }
+            this._finishSimulation();
             return;
         }
         this.stepTimer = 0;
@@ -118,6 +110,29 @@ export class SimulationController {
             this.ui.updateStats({ rescued: this.civiliansRescued, floods: this.floodCount });
         }
         this.step++;
+    }
+
+    _finishSimulation() {
+        this.playing = false; this.finished = true;
+        if (this.ui) {
+            this.ui.showToast(`SIMULATION COMPLETE — ${this.civiliansRescued} civilians rescued!`, 'success');
+            this.ui.addLogEntry('System', '=== ALL 20 STEPS COMPLETE ===', 'system');
+        }
+        this.pathViz.clearAll();
+        this.ambTasks.forEach((task, slot) => {
+            if (task.done) return;
+            task.done = true;
+            const depot = AMB_DEPOTS[slot];
+            const path = this._bfs(task.teamPos, depot);
+            if (path.length > 0) {
+                this.pathViz.showPath(path, AMB_COLORS[slot], `amb${slot}_return`);
+                this.vehicles.setPath(slot, path);
+            }
+            if (this.ui) {
+                this.ui.showToast(`${AMB_NAMES[slot]} returning to depot`, 'info');
+                this.ui.addLogEntry('RETURN', `${AMB_NAMES[slot]} returning to base at (${depot})`, 'system');
+            }
+        });
     }
 
     _doFlood() {
@@ -148,9 +163,30 @@ export class SimulationController {
     }
 
     _routeAmbulance(slot, task) {
-        if (this.ambCivIdx[slot] >= task.civs.length) return;
+        if (task.done) return;
+
+        const amb = this.vehicles.ambulances[slot];
+        if (amb.moving) return;
+
+        if (this.ambCivIdx[slot] >= task.civs.length) {
+            if (!task.returning) {
+                task.returning = true;
+                const depot = AMB_DEPOTS[slot];
+                const path = this._bfs(task.teamPos, depot);
+                if (path.length > 0) {
+                    this.pathViz.showPath(path, AMB_COLORS[slot], `amb${slot}_return_s${this.step}`);
+                    this.vehicles.setPath(slot, path);
+                    if (this.ui) {
+                        this.ui.showToast(`${AMB_NAMES[slot]} all civilians rescued — returning to depot`, 'info');
+                        this.ui.addLogEntry('RETURN', `${AMB_NAMES[slot]} returning to base at (${depot})`, 'system');
+                    }
+                }
+            }
+            return;
+        }
+
         const civIdx = task.civs[this.ambCivIdx[slot]];
-        if (civIdx >= this.civilians.length) return;
+        if (civIdx >= this.civilians.length) { this.ambCivIdx[slot]++; return; }
         const civ = this.civilians[civIdx];
 
         const path = this._bfs(task.teamPos, civ);
@@ -161,10 +197,9 @@ export class SimulationController {
         task.teamPos = [...civ];
         this.civiliansRescued++;
 
-        const names = ['Alpha','Bravo','Charlie'];
         if (this.ui) {
-            this.ui.addLogEntry('RESCUE', `${names[slot]} -> civilian #${this.civiliansRescued} at (${civ}) [${path.length} steps]`, 'system');
-            this.ui.showToast(`${names[slot]} rescuing civilian ${this.civiliansRescued}`, 'info');
+            this.ui.addLogEntry('RESCUE', `${AMB_NAMES[slot]} -> civilian #${this.civiliansRescued} at (${civ}) [${path.length} steps]`, 'system');
+            this.ui.showToast(`${AMB_NAMES[slot]} rescuing civilian ${this.civiliansRescued}`, 'info');
         }
         this.ambCivIdx[slot]++;
     }
