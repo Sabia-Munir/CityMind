@@ -23,26 +23,34 @@ export class SimulationController {
         this.floodCount = 0;
         this.blockedRoads = [];
         this.finished = false;
+        this.stepStarted = false;
 
         this.civilians = this._pickCivilians();
-        this.ambTasks = this._initTasks();
+        this.ambTasks = [
+            { civIdx: 0, returning: false, done: false },
+            { civIdx: 0, returning: false, done: false },
+            { civIdx: 0, returning: false, done: false },
+        ];
+        this.ambCivLists = this._splitCivilians();
 
         this._bindButtons();
     }
 
-    _initTasks() {
+    _splitCivilians() {
         const perAmb = Math.ceil(this.civilians.length / 3);
         return [
-            { idx: 0, civs: this.civilians.slice(0, perAmb).map((_, i) => i), returning: false, done: false },
-            { idx: 1, civs: this.civilians.slice(perAmb, perAmb * 2).map((_, i) => perAmb + i), returning: false, done: false },
-            { idx: 2, civs: this.civilians.slice(perAmb * 2).map((_, i) => perAmb * 2 + i), returning: false, done: false },
+            this.civilians.slice(0, perAmb),
+            this.civilians.slice(perAmb, perAmb * 2),
+            this.civilians.slice(perAmb * 2),
         ];
     }
 
     _pickCivilians() {
-        const civs = [];
-        const occ = new Set([primaryHospital.join(','), primaryDepot.join(','), ...AMB_STARTS.map(a => a.join(','))]);
-        const rng = this._rng(42);
+        const occ = new Set();
+        occ.add(primaryHospital.join(','));
+        occ.add(primaryDepot.join(','));
+        AMB_STARTS.forEach(a => occ.add(a.join(',')));
+
         const residential = [];
         for (let r = 0; r < GRID_ROWS; r++) {
             for (let c = 0; c < GRID_COLS; c++) {
@@ -51,16 +59,13 @@ export class SimulationController {
                 }
             }
         }
-        const shuffled = residential.slice();
-        for (let i = shuffled.length - 1; i > 0; i--) {
+
+        const rng = this._rng(42);
+        for (let i = residential.length - 1; i > 0; i--) {
             const j = Math.floor(rng() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            [residential[i], residential[j]] = [residential[j], residential[i]];
         }
-        const count = Math.min(60, shuffled.length);
-        for (let i = 0; i < count; i++) {
-            civs.push(shuffled[i]);
-        }
-        return civs;
+        return residential;
     }
 
     _rng(seed) { let s = seed; return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; }
@@ -73,8 +78,12 @@ export class SimulationController {
     }
 
     play() {
+        if (this.finished) return;
         this.playing = true;
-        if (this.step === 0 && !this.finished) { this.step = 1; this._runStep(); }
+        if (this.step === 0) {
+            this.step = 1;
+            this._runStep();
+        }
         if (this.ui) this.ui.showToast('Simulation started — 3 ambulances active', 'success');
     }
 
@@ -84,13 +93,25 @@ export class SimulationController {
     }
 
     reset() {
-        this.playing = false; this.step = 0; this.stepTimer = 0;
-        this.civiliansRescued = 0; this.floodCount = 0; this.finished = false;
+        this.playing = false;
+        this.step = 0;
+        this.stepTimer = 0;
+        this.stepStarted = false;
+        this.civiliansRescued = 0;
+        this.floodCount = 0;
+        this.finished = false;
         this.blockedRoads = [];
-        this.civilians = this._pickCivilians();
-        this.ambTasks = this._initTasks();
 
-        this.floods.clearAll(); this.pathViz.clearAll();
+        this.civilians = this._pickCivilians();
+        this.ambCivLists = this._splitCivilians();
+        this.ambTasks = [
+            { civIdx: 0, returning: false, done: false },
+            { civIdx: 0, returning: false, done: false },
+            { civIdx: 0, returning: false, done: false },
+        ];
+
+        this.floods.clearAll();
+        this.pathViz.clearAll();
         this.vehicles.teleportTo(0, AMB_STARTS[0][0], AMB_STARTS[0][1]);
         this.vehicles.teleportTo(1, AMB_STARTS[1][0], AMB_STARTS[1][1]);
         this.vehicles.teleportTo(2, AMB_STARTS[2][0], AMB_STARTS[2][1]);
@@ -112,7 +133,9 @@ export class SimulationController {
 
         this._doFlood();
 
-        this.ambTasks.forEach((task, slot) => this._routeAmbulance(slot, task));
+        for (let slot = 0; slot < 3; slot++) {
+            this._routeAmbulance(slot);
+        }
 
         if (this.step % 3 === 0 && this.blockedRoads.length > 0) this._doRecovery();
 
@@ -124,14 +147,16 @@ export class SimulationController {
     }
 
     _finishSimulation() {
-        this.playing = false; this.finished = true;
+        this.playing = false;
+        this.finished = true;
         if (this.ui) {
             this.ui.showToast(`SIMULATION COMPLETE — ${this.civiliansRescued} civilians rescued!`, 'success');
             this.ui.addLogEntry('System', '=== ALL 20 STEPS COMPLETE ===', 'system');
         }
         this.pathViz.clearAll();
-        this.ambTasks.forEach((task, slot) => {
-            if (task.done) return;
+        for (let slot = 0; slot < 3; slot++) {
+            const task = this.ambTasks[slot];
+            if (task.done) continue;
             task.done = true;
             const depot = AMB_DEPOTS[slot];
             const curPos = this._getAmbGridPos(slot);
@@ -144,7 +169,7 @@ export class SimulationController {
                 this.ui.showToast(`${AMB_NAMES[slot]} returning to depot`, 'info');
                 this.ui.addLogEntry('RETURN', `${AMB_NAMES[slot]} returning to base at (${depot})`, 'system');
             }
-        });
+        }
     }
 
     _getAmbGridPos(slot) {
@@ -153,9 +178,10 @@ export class SimulationController {
         const offset = -(GRID_COLS * TILE_SIZE) / 2 + TILE_SIZE / 2;
         const col = Math.round((amb.mesh.position.x - offset) / TILE_SIZE);
         const row = Math.round((amb.mesh.position.z - offset) / TILE_SIZE);
-        const cr = Math.max(0, Math.min(GRID_ROWS - 1, row));
-        const cc = Math.max(0, Math.min(GRID_COLS - 1, col));
-        return [cr, cc];
+        return [
+            Math.max(0, Math.min(GRID_ROWS - 1, row)),
+            Math.max(0, Math.min(GRID_COLS - 1, col))
+        ];
     }
 
     _doFlood() {
@@ -185,10 +211,13 @@ export class SimulationController {
         }
     }
 
-    _routeAmbulance(slot, task) {
+    _routeAmbulance(slot) {
+        const task = this.ambTasks[slot];
         if (task.done) return;
 
-        if (this.ambCivIdx[slot] >= task.civs.length) {
+        const civList = this.ambCivLists[slot];
+
+        if (task.civIdx >= civList.length) {
             if (!task.returning) {
                 task.returning = true;
                 const depot = AMB_DEPOTS[slot];
@@ -198,31 +227,32 @@ export class SimulationController {
                     this.pathViz.showPath(path, AMB_COLORS[slot], `amb${slot}_return_s${this.step}`);
                     this.vehicles.setPath(slot, path);
                     if (this.ui) {
-                        this.ui.showToast(`${AMB_NAMES[slot]} all civilians rescued — returning to depot`, 'info');
-                        this.ui.addLogEntry('RETURN', `${AMB_NAMES[slot]} returning to base at (${depot})`, 'system');
+                        this.ui.showToast(`${AMB_NAMES[slot]} returning to depot`, 'info');
+                        this.ui.addLogEntry('RETURN', `${AMB_NAMES[slot]} heading to base at (${depot})`, 'system');
                     }
                 }
             }
             return;
         }
 
-        const civIdx = task.civs[this.ambCivIdx[slot]];
-        if (civIdx >= this.civilians.length) { this.ambCivIdx[slot]++; return; }
-        const civ = this.civilians[civIdx];
-
+        const civ = civList[task.civIdx];
         const curPos = this._getAmbGridPos(slot);
         const path = this._bfs(curPos, civ);
-        if (path.length === 0) { this.ambCivIdx[slot]++; return; }
+
+        if (path.length === 0) {
+            task.civIdx++;
+            return;
+        }
 
         this.pathViz.showPath(path, AMB_COLORS[slot], `amb${slot}_s${this.step}`);
         this.vehicles.setPath(slot, path);
         this.civiliansRescued++;
+        task.civIdx++;
 
         if (this.ui) {
             this.ui.addLogEntry('RESCUE', `${AMB_NAMES[slot]} -> civilian #${this.civiliansRescued} at (${civ}) [${path.length} steps]`, 'system');
             this.ui.showToast(`${AMB_NAMES[slot]} rescuing civilian ${this.civiliansRescued}`, 'info');
         }
-        this.ambCivIdx[slot]++;
     }
 
     _bfs(start, goal) {
