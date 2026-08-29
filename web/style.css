@@ -249,7 +249,12 @@ html, body {
     margin-right: 6px;
 }
 
-.log-entry .log-flood { color: #ff6b6b; }
+.log-time {
+    color: #556677;
+    font-size: 0.6rem;
+}
+
+.log-entry .log-flood { color: #ff6b6b; font-weight: 600; }
 .log-entry .log-restore { color: #6bff6b; }
 .log-entry .log-risk { color: #ffcc44; }
 .log-entry .log-system { color: #81d4fa; }

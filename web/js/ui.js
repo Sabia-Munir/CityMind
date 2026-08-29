@@ -100,8 +100,12 @@ export class UIController {
         if (!this.logEntries) return;
         const entry = document.createElement('div');
         entry.className = 'log-entry';
-        entry.innerHTML = `<span class="log-${type}">[${category}]</span> ${message}`;
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${type}">[${category}]</span> ${message}`;
         this.logEntries.appendChild(entry);
+        if (this.logEntries.children.length > 50) {
+            this.logEntries.removeChild(this.logEntries.firstChild);
+        }
         this.logEntries.scrollTop = this.logEntries.scrollHeight;
     }
 
